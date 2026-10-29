@@ -1042,7 +1042,26 @@ async function deliverPdf(blob, filename) {
   toast('PDF téléchargé : ' + filename, 'ok'); return true;
 }
 function canDirectPrint() { return !isArtifact(); }
-async function directPrint(pages, pageSize) {
+function isIOS() { return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
+let _pdfReady = null;
+/* iPad / iPhone : window.print() sort des pages blanches dans Safari ; on fabrique le PDF exact et on l'envoie à AirPrint via le menu Partager → Imprimer */
+async function iosPrint(pages, name) {
+  const brother = pages[0] && pages[0].w <= 70;
+  const blob = await pagesToPdf(pages, brother ? { scale: 4, quality: 0.95 } : { scale: 3 });
+  _pdfReady = { blob, name };
+  openModal({ title: 'Prêt à imprimer', narrow: true, body: `<p><strong>${pages.length} page${pages.length > 1 ? 's' : ''}</strong> (${pages[0].w} × ${pages[0].h} mm) — ${esc(name)}</p><p class="help">Touchez le bouton, puis <strong>Imprimer</strong> dans le menu qui s'ouvre et choisissez ${brother ? 'la Brother' : 'la HP'}. Échelle 100 %, sans ajustement.</p>`, footer: `<button class="btn" data-close="1">Annuler</button><button class="btn btn-primary btn-lg" data-act="iosshare">${I.print} Imprimer / Partager</button>` });
+}
+async function iosShare() {
+  if (!_pdfReady) return;
+  const { blob, name } = _pdfReady;
+  const file = new File([blob], name, { type: 'application/pdf' });
+  if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+    try { await navigator.share({ files: [file], title: name }); closeModal(); return; } catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  const url = URL.createObjectURL(blob); const w = window.open(url, '_blank'); if (!w) location.href = url; closeModal();
+}
+async function directPrint(pages, pageSize, name) {
+  if (isIOS()) return iosPrint(pages, name || `impression-BHVA-${todayStr()}.pdf`);
   await ensureFonts();
   const root = $('#print-root'); root.innerHTML = pages.map(p => p.html).join('');
   let st = $('#dyn-page-style'); if (!st) { st = document.createElement('style'); st.id = 'dyn-page-style'; document.head.appendChild(st); }
@@ -1062,7 +1081,7 @@ async function printPriceSheets(mode, btn) {
   const pages = sheets.map((sh, i) => { const F = FORMATS[sh.format]; const land = F.orient === 'landscape'; return { html: sheetHTML(sh, i), w: land ? 297 : 210, h: land ? 210 : 297 }; });
   busy(btn, true, 'Préparation…');
   try {
-    if (mode === 'direct') await directPrint(pages, null);
+    if (mode === 'direct') await directPrint(pages, null, `affiches-HP-${todayStr()}.pdf`);
     else { const blob = await pagesToPdf(pages); await deliverPdf(blob, `affiches-HP-${todayStr()}.pdf`); }
     await logJournal({ type: 'prix', detail: `${PriceQueue.hp().reduce((s, x) => s + x.copies, 0)} affiche(s) prix sur ${sheets.length} feuille(s) A4 (HP)` });
   } catch (e) { console.error(e); toast('Échec : ' + e.message, 'err', 6000); }
@@ -1073,7 +1092,7 @@ async function printPriceBrother(mode, btn) {
   if (!pages.length) { toast('Aucune étiquette 62 mm à imprimer.'); return; }
   busy(btn, true, 'Préparation…');
   try {
-    if (mode === 'direct') await directPrint(pages, { w: W, h: H });
+    if (mode === 'direct') await directPrint(pages, { w: W, h: H }, `etiquettes-Brother-${todayStr()}.pdf`);
     else { const blob = await pagesToPdf(pages, { scale: 4, quality: 0.95 }); await deliverPdf(blob, `etiquettes-Brother-${todayStr()}.pdf`); }
     await logJournal({ type: 'prix', detail: `${pages.length} étiquette(s) prix 62 × ${H} mm (Brother)` });
   } catch (e) { console.error(e); toast('Échec : ' + e.message, 'err', 6000); }
@@ -1324,7 +1343,7 @@ async function printTraceLabels(mode, btn) {
   if (!pages.length) { toast('Aucune étiquette de traçabilité à imprimer.'); return; }
   busy(btn, true, 'Préparation…');
   try {
-    if (mode === 'direct') await directPrint(pages, { w: W, h: H });
+    if (mode === 'direct') await directPrint(pages, { w: W, h: H }, `etiquettes-tracabilite-${todayStr()}.pdf`);
     else { const blob = await pagesToPdf(pages, { scale: 4, quality: 0.95 }); await deliverPdf(blob, `etiquettes-tracabilite-${todayStr()}.pdf`); }
     for (const it of TraceQueue.items) { const d = traceLabelData(it.type, it.refId); if (d) await logJournal({ type: 'trace', lot: d.lot, produit: d.produit, code: d.code, copies: it.copies }); if (it.type === 'fabrication') { const f = Store.get('fabrications', it.refId); if (f) await Store.patch('fabrications', it.refId, { etiquettes: (f.etiquettes || 0) + it.copies }); } }
   } catch (e) { console.error(e); toast('Échec : ' + e.message, 'err', 6000); }
@@ -1586,7 +1605,7 @@ async function printOrdersSheet(btn) {
   const per = 9; const pages = []; const total = Math.ceil(list.length / per);
   for (let i = 0; i < list.length; i += per) { const rows = list.slice(i, i + per); pages.push({ w: 210, h: 297, html: `<div class="sheet docpage" style="width:210mm;height:297mm;display:block"><div class="dh"><div><h1>Commandes du ${esc(fmtDate(t, 'long'))}</h1><div>${esc(s.nom || '')}</div></div><div style="text-align:right">${list.length} commande${list.length > 1 ? 's' : ''}<br>page ${pages.length + 1} / ${total}</div></div>${rows.map(c => `<div class="ord"><div class="t"><span>${esc(c.heure || '—')} · ${esc(c.client)}${c.tel ? ' · ' + esc(c.tel) : ''}</span><span>☐ préparée ☐ retirée</span></div><div class="x">${esc(c.texte)}</div></div>`).join('')}</div>` }); }
   busy(btn, true, 'Préparation…');
-  try { if (canDirectPrint()) await directPrint(pages, null); else { const blob = await pagesToPdf(pages, { scale: 2.2 }); await deliverPdf(blob, `commandes-${t}.pdf`); } } catch (e) { toast('Échec : ' + e.message, 'err', 6000); }
+  try { if (canDirectPrint()) await directPrint(pages, null, `commandes-${t}.pdf`); else { const blob = await pagesToPdf(pages, { scale: 2.2 }); await deliverPdf(blob, `commandes-${t}.pdf`); } } catch (e) { toast('Échec : ' + e.message, 'err', 6000); }
   busy(btn, false);
 }
 
@@ -1863,6 +1882,7 @@ const Actions = {
   fbconnect: () => { const t = ($('#fb-config') || {}).value || ''; const m = t.match(/\{[\s\S]*\}/); if (!m) { toast('Collez la configuration complète, entre accolades.', 'err'); return; } let cfg; try { cfg = JSON.parse(m[0].replace(/(\w+)\s*:/g, '"$1":').replace(/'/g, '"').replace(/,\s*}/g, '}')); } catch (e) { toast('Configuration illisible : ' + e.message, 'err', 6000); return; } if (!cfg.projectId || !cfg.apiKey) { toast('Il manque projectId ou apiKey.', 'err'); return; } LS.set('firebase', cfg); toast('Configuration enregistrée, rechargement…', 'ok'); setTimeout(() => location.reload(), 800); },
   fbdisconnect: async () => { if (await confirmDialog('Déconnecter cet appareil de la base partagée ? Les données resteront dans la base, cet appareil repassera en mode local.', { danger: true, ok: 'Déconnecter' })) { try { if (window.firebase && firebase.apps.length) await firebase.auth().signOut(); } catch (e) { } LS.del('firebase'); LS.set('fbSkip', true); location.reload(); } },
   fbreconnect: () => { LS.del('fbSkip'); location.reload(); },
+  iosshare: () => iosShare(),
   pushtest: async () => { const ok = await sendPush('Test BHVA', 'Les notifications fonctionnent ✔︎'); toast(ok ? 'Notification envoyée — regardez l\'appli ntfy' : 'Envoi impossible (connexion internet ?)', ok ? 'ok' : 'err', 5000); },
   alarmtest: () => Alarm.start({ type: 'prix', nom: 'Test', de: 1, a: 2, t: new Date().toISOString() }, true),
   alarmok: async () => { Alarm.stop(); for (const n of unreadNotifs()) await Store.patch('notifications', n.id, { lu: true }); render(); },
