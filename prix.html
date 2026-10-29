@@ -1244,7 +1244,7 @@ Views.gestion = function () {
   </div>
   <p class="help" style="margin:8px 0 10px">Tapez le nouveau prix dans la case (ex. 28,80) : il est enregistré dès que vous quittez la case, et le comptoir reçoit l'alerte. Crayon : nom, unité, origine, offres (dès 2 kg… ou lot).</p>
   <div class="card">${!prods.length ? `<div class="empty"><strong>Le catalogue est vide.</strong><button class="btn btn-primary" data-act="seed">Charger les 246 produits de départ</button></div>` : ''}${list.length ? list.map(p => `<div class="gest-row"><div><div class="n">${esc(p.name)}${p.actif === false ? ' <span class="pill pill-neutral">masqué</span>' : ''}</div><div class="s">${esc(p.cat === 'viande' ? (ESPECE_TAG[p.espece] || 'Viande') : CAT_LABEL[p.cat] || '')} · ${esc(UNIT_LABEL[p.unit] || p.unit)}${productLabelOrigin(p).lines[0] ? ' · ' + esc(productLabelOrigin(p).lines[0]) : ''}${(p.promos || []).length ? ' · ' + (p.promos || []).map(pr => esc(promoText(p, pr))).join(' · ') : ''}</div></div><input class="input num" type="text" inputmode="decimal" enterkeyhint="done" value="${p.price == null ? '' : p.price.toFixed(2).replace('.', ',')}" data-on="price" data-id="${p.id}" id="price-${p.id}" aria-label="Prix de ${esc(p.name)}"><button class="icon-btn" data-act="editp" data-id="${p.id}" aria-label="Modifier">${I.pencil}</button></div>`).join('') : `<div class="empty"><strong>Aucun produit.</strong></div>`}</div>
-  ${window.FORCE_GESTION ? `<p class="help" style="margin-top:12px">${Store.mode === 'local' ? 'PAS SYNCHRONISÉ : les prix restent sur ce téléphone. Vérifiez la connexion internet puis touchez la pastille rouge en haut.' : 'Synchronisé : chaque changement part immédiatement au comptoir et en notification.'}</p>` : `<div class="card card-pad stack" style="margin-top:14px"><h3>Installer sur ce téléphone</h3>
+  ${window.FORCE_GESTION ? `<p class="help" style="margin-top:12px">${Store.mode === 'local' ? 'PAS SYNCHRONISÉ : les prix restent sur ce téléphone. Vérifiez la connexion internet puis touchez la pastille rouge en haut.' : 'Synchronisé : chaque changement part immédiatement au comptoir et en notification.'}</p><div class="row" style="margin-top:8px"><button class="btn btn-sm" data-act="pushtest">Envoyer une notification de test à l'iPad</button></div>` : `<div class="card card-pad stack" style="margin-top:14px"><h3>Installer sur ce téléphone</h3>
     <label class="check"><input type="checkbox" id="opt-gestdev" data-on="gestdev" ${LS.get('gestionDevice', false) ? 'checked' : ''}> Sur cet appareil, ouvrir directement la gestion des prix (jamais le comptoir)</label>
     <p class="help">Cochez cette case, puis dans le navigateur : Partager → « Ajouter à l'écran d'accueil » (iPhone : Safari ; Android : Chrome, menu ⋮ → « Ajouter à l'écran d'accueil »). L'icône ouvrira cette application, synchronisée en direct avec le comptoir.${un ? ` · ${un} changement(s) pas encore vu(s) au comptoir.` : ''}</p>
     <div class="row"><button class="btn btn-sm" data-act="copylink">Copier le lien de l'application prix</button><a class="btn btn-sm btn-ghost" href="#accueil" data-act="leavegest">Aller au comptoir</a></div></div>`}`;
@@ -1946,15 +1946,43 @@ Store.onChange(c => { if (c !== 'notifications') return; const ids = new Set(Sto
 
 /* ===================== écran d'attente ===================== */
 /* ===================== ALERTE SONORE PERSISTANTE (comptoir) ===================== */
+/* son d'alarme : fichier WAV fabriqué en mémoire, joué par un lecteur <audio> en boucle (sur iPad, un lecteur audio sonne même avec l'interrupteur silencieux, contrairement aux bips Web Audio) */
+function makeAlarmWav() {
+  const sr = 22050, dur = 2.0, n = Math.floor(sr * dur), data = new Int16Array(n);
+  const beeps = [[0.00, 0.22, 880], [0.26, 0.48, 1175], [0.52, 0.74, 880], [0.78, 1.00, 1175]];
+  for (let i = 0; i < n; i++) {
+    const t = i / sr; let v = 0;
+    for (const [a, b, f] of beeps) { if (t >= a && t < b) { const env = Math.min(1, (t - a) / 0.01, (b - t) / 0.03); v = (Math.sin(2 * Math.PI * f * t) > 0 ? 1 : -1) * 0.6 * env; } }
+    data[i] = Math.max(-1, Math.min(1, v)) * 32767;
+  }
+  const buf = new ArrayBuffer(44 + n * 2), dv = new DataView(buf);
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, 'RIFF'); dv.setUint32(4, 36 + n * 2, true); str(8, 'WAVE'); str(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, sr, true); dv.setUint32(28, sr * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); str(36, 'data'); dv.setUint32(40, n * 2, true);
+  new Int16Array(buf, 44).set(data);
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
 const Alarm = {
-  ctx: null, timer: null, el: null, unlocked: false,
-  unlock() { try { if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); if (this.ctx.state === 'suspended') this.ctx.resume(); const b = this.ctx.createBuffer(1, 1, 22050); const s = this.ctx.createBufferSource(); s.buffer = b; s.connect(this.ctx.destination); s.start(0); this.unlocked = true; const h = $('#sound-hint'); if (h) h.remove(); } catch (e) { } },
+  ctx: null, timer: null, el: null, unlocked: false, audio: null,
+  player() { if (!this.audio) { const a = new Audio(makeAlarmWav()); a.loop = true; a.volume = 1; a.preload = 'auto'; a.setAttribute('playsinline', ''); this.audio = a; } return this.audio; },
+  unlock() {
+    try {
+      const a = this.player(); const p = a.play(); if (p && p.then) p.then(() => { if (!this.timer) { a.pause(); a.currentTime = 0; } this.unlocked = true; const h = $('#sound-hint'); if (h) { h.remove(); toast('Sonnerie des alertes activée sur cet appareil', 'ok', 2500); } }).catch(() => { });
+      if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); if (this.ctx.state === 'suspended') this.ctx.resume();
+      const b = this.ctx.createBuffer(1, 1, 22050); const s = this.ctx.createBufferSource(); s.buffer = b; s.connect(this.ctx.destination); s.start(0);
+    } catch (e) { }
+  },
   beep() {
     try {
       if (!this.ctx) return; if (this.ctx.state === 'suspended') this.ctx.resume();
       const t0 = this.ctx.currentTime;
-      [[880, 0], [1175, .18], [880, .36], [1175, .54]].forEach(([f, dt]) => { const o = this.ctx.createOscillator(); const g = this.ctx.createGain(); o.type = 'square'; o.frequency.value = f; g.gain.setValueAtTime(0.0001, t0 + dt); g.gain.exponentialRampToValueAtTime(0.5, t0 + dt + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.16); o.connect(g); g.connect(this.ctx.destination); o.start(t0 + dt); o.stop(t0 + dt + 0.18); });
+      [[880, 0], [1175, .26], [880, .52], [1175, .78]].forEach(([f, dt]) => { const o = this.ctx.createOscillator(); const g = this.ctx.createGain(); o.type = 'square'; o.frequency.value = f; g.gain.setValueAtTime(0.0001, t0 + dt); g.gain.exponentialRampToValueAtTime(0.5, t0 + dt + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.2); o.connect(g); g.connect(this.ctx.destination); o.start(t0 + dt); o.stop(t0 + dt + 0.22); });
     } catch (e) { }
+  },
+  ring() {
+    const a = this.player(); a.volume = 1;
+    const p = a.play();
+    const fallback = () => { clearInterval(this.timer); this.beep(); this.timer = setInterval(() => this.beep(), 2000); };
+    if (p && p.then) p.then(() => { clearInterval(this.timer); this.timer = setInterval(() => { if (a.paused) a.play().catch(() => { }); }, 2000); }).catch(fallback); else fallback();
   },
   start(n, test = false) {
     if (window.FORCE_GESTION) return;
@@ -1962,11 +1990,11 @@ const Alarm = {
     const txt = n.type === 'prix' ? `${esc(n.nom)}<br><span class="alarm-price">${esc(fmtMoney(n.de))} → ${esc(fmtMoney(n.a))}</span>` : `Nouveau produit : ${esc(n.nom)}`;
     if (!this.el) { this.el = document.createElement('div'); this.el.className = 'alarm'; document.body.appendChild(this.el); }
     const nb = unreadNotifs().length;
-    this.el.innerHTML = `<div class="alarm-ico">${I.bell}</div><div class="alarm-title">${n.type === 'prix' ? 'PRIX MODIFIÉ' : 'NOUVEAU PRODUIT'}</div><div class="alarm-txt">${txt}</div><div class="alarm-sub">${esc(fmtDateTime(n.t))}${nb > 1 ? ` · ${nb} changements à voir` : ''}${test ? ' · test' : ''}</div><button class="btn alarm-ok" data-act="alarmok">OK, vu — arrêter la sonnerie</button>`;
-    clearInterval(this.timer); this.beep(); this.timer = setInterval(() => this.beep(), 1500);
+    this.el.innerHTML = `<div class="alarm-ico">${I.bell}</div><div class="alarm-title">${n.type === 'prix' ? 'PRIX MODIFIÉ' : 'NOUVEAU PRODUIT'}</div><div class="alarm-txt">${txt}</div><div class="alarm-sub">${esc(fmtDateTime(n.t))}${nb > 1 ? ` · ${nb} changements à voir` : ''}${test ? ' · test' : ''}</div><button class="btn alarm-ok" data-act="alarmok">OK, vu — arrêter la sonnerie</button>${this.unlocked ? '' : '<div class="alarm-sub" style="margin-top:8px">Pas de son ? Touchez l\'écran une fois au démarrage de l\'application pour activer la sonnerie.</div>'}`;
+    this.ring();
     try { navigator.vibrate && navigator.vibrate([300, 200, 300]); } catch (e) { }
   },
-  stop() { clearInterval(this.timer); this.timer = null; if (this.el) { this.el.remove(); this.el = null; } }
+  stop() { clearInterval(this.timer); this.timer = null; try { if (this.audio) { this.audio.pause(); this.audio.currentTime = 0; } } catch (e) { } if (this.el) { this.el.remove(); this.el = null; } }
 };
 ['pointerdown', 'touchend', 'keydown'].forEach(ev => document.addEventListener(ev, () => { if (!Alarm.unlocked) Alarm.unlock(); }, { passive: true }));
 function soundHint() { if (window.FORCE_GESTION || Alarm.unlocked || $('#sound-hint')) return; const d = document.createElement('div'); d.id = 'sound-hint'; d.className = 'sound-hint'; d.innerHTML = `${I.bell} Touchez l'écran une fois pour activer la sonnerie des alertes`; d.addEventListener('pointerdown', () => Alarm.unlock()); document.body.appendChild(d); }
