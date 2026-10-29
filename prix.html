@@ -110,7 +110,24 @@ body.gestion-mode .brand-mark{color:#1b1917}
 .gest-row .n{font-weight:600;line-height:1.2}
 .gest-row .s{font-size:.78rem;color:var(--fg-2)}
 .gest-row input{width:110px;text-align:right;min-height:44px;font-size:1.05rem;font-weight:700}
-.gest-head{position:sticky;top:calc(var(--nav-h) + env(safe-area-inset-top,0px));z-index:20;background:var(--bg);padding:10px 0;display:flex;flex-direction:column;gap:8px}
+.gest-top{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 0 6px}
+.gest-top h1{margin:0;font-size:1.5rem;line-height:1.1}
+.gest-head{position:sticky;top:calc(var(--nav-h) + env(safe-area-inset-top,0px));z-index:20;background:var(--bg);padding:8px 0 10px;display:flex;flex-direction:column;gap:8px;box-shadow:0 8px 10px -10px rgba(0,0,0,.35)}
+body.gestion-mode .gest-head{top:calc(50px + env(safe-area-inset-top,0px))}
+.gest-head .chips{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:2px}
+.gest-head .chips::-webkit-scrollbar{display:none}
+.gest-head .chip{flex:none}
+.alarm{position:fixed;inset:0;z-index:500;background:#ffd60a;color:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:28px 20px;text-align:center;animation:alarmflash 1s steps(2,end) infinite}
+@keyframes alarmflash{50%{background:#ffb703}}
+.alarm-ico svg{width:96px;height:96px;animation:ring .5s ease-in-out infinite}
+@keyframes ring{0%,100%{transform:rotate(-12deg)}50%{transform:rotate(12deg)}}
+.alarm-title{font-family:var(--font-display,inherit);font-size:clamp(2rem,7vw,4rem);font-weight:800;letter-spacing:.04em}
+.alarm-txt{font-size:clamp(1.6rem,5vw,3rem);font-weight:700;line-height:1.2}
+.alarm-price{font-variant-numeric:tabular-nums}
+.alarm-sub{font-size:1rem;opacity:.75}
+.alarm button.alarm-ok{margin-top:10px;background:#111!important;color:#fff!important;border-color:#111!important;font-size:1.3rem;padding:18px 28px;min-height:64px;border-radius:14px;width:min(92vw,520px)}
+.sound-hint{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:120;background:#111;color:#fff;padding:12px 16px;border-radius:999px;display:flex;align-items:center;gap:8px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.3);max-width:92vw}
+.sound-hint svg{width:18px;height:18px;flex:none}
 .nav{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;padding:0 max(12px,env(safe-area-inset-left,0px)) 6px max(12px,env(safe-area-inset-right,0px));margin-top:-2px}
 .nav::-webkit-scrollbar{display:none}
 .nav a{flex:none;display:flex;align-items:center;gap:7px;padding:7px 12px;border-radius:999px;color:rgba(255,255,255,.85);text-decoration:none;font-weight:600;font-size:.86rem;white-space:nowrap}
@@ -492,7 +509,7 @@ details.adv summary{cursor:pointer;font-weight:600;color:var(--fg-2);padding:6px
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script>const FIREBASE_CONFIG={apiKey:"AIzaSyAuEx9IUK0JdWXJeLgFj86IB0-KCdwaf4U",authDomain:"bhva-gestion.firebaseapp.com",projectId:"bhva-gestion",storageBucket:"bhva-gestion.firebasestorage.app",messagingSenderId:"544721878098",appId:"1:544721878098:web:c3161a8b827f2f1bb7338b"};const FIREBASE_LOGIN="boucherie@bhva-gestion.app";</script>
+<script>const FIREBASE_CONFIG={apiKey:"AIzaSyAuEx9IUK0JdWXJeLgFj86IB0-KCdwaf4U",authDomain:"bhva-gestion.firebaseapp.com",projectId:"bhva-gestion",storageBucket:"bhva-gestion.firebasestorage.app",messagingSenderId:"544721878098",appId:"1:544721878098:web:c3161a8b827f2f1bb7338b"};const FIREBASE_LOGIN="boucherie@bhva-gestion.app";const NTFY_TOPIC="bhva-elfen-prix-7q4m2x";</script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
@@ -598,10 +615,18 @@ const Store = {
     }
     this.ready = true;
   },
+  deviceId() { let d = LS.get('deviceId', ''); if (!d) { d = 'd-' + uid(); LS.set('deviceId', d); } return d; },
   async initFirebase(cfg) {
     if (!firebase.apps.length) firebase.initializeApp(cfg);
     const a = firebase.auth(); await a.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+    const fs0 = firebase.firestore(); try { fs0.settings({ ignoreUndefinedProperties: true, merge: true }); } catch (e) { }
     await new Promise(res => { const un = a.onAuthStateChanged(() => { un(); res(); }); });
+    if (!a.currentUser) {
+      /* sans mot de passe : connexion anonyme (autorisée par les règles de la base) */
+      let anonOk = false;
+      try { await a.signInAnonymously(); try { await fs0.collection('reglages').limit(1).get({ source: 'server' }); anonOk = true; } catch (e) { anonOk = !(e && e.code === 'permission-denied'); } } catch (e) { anonOk = false; }
+      if (!anonOk) { try { await a.signOut(); } catch (e) { } }
+    }
     if (!a.currentUser) {
       const pwd = (await askShopPassword(this._pwdErr || '') || '').trim();
       if (!pwd) { this._pwdErr = 'Le mot de passe est obligatoire pour que les prix soient synchronisés.'; return this.initFirebase(cfg); }
@@ -609,7 +634,7 @@ const Store = {
       try { await a.signInWithEmailAndPassword(FIREBASE_LOGIN, pwd); this._pwdErr = ''; }
       catch (e) { LS.del('shopPwdOk'); const wrong = e && (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials'); this._pwdErr = wrong ? 'Mot de passe incorrect. Vérifiez les majuscules et le tiret : il commence par « ElFen- ».' : (e && e.code === 'auth/network-request-failed' ? 'Pas de connexion internet : réessayez.' : 'Connexion impossible : ' + (e && e.code || 'erreur')); return this.initFirebase(cfg); }
     }
-    const fs = firebase.firestore(); try { fs.settings({ ignoreUndefinedProperties: true, merge: true }); } catch (e) { }
+    const fs = fs0;
     try { await fs.enablePersistence({ synchronizeTabs: true }); } catch (e) { }
     this.fb = fs; this.mode = 'firebase';
     const localData = {}; COLLS.forEach(c => { localData[c] = LS.get('coll:' + c, {}); });
@@ -652,7 +677,7 @@ const Store = {
   onChange(fn) { this._subs.add(fn); return () => this._subs.delete(fn); },
   notify(c) { if (this._raf) return; this._raf = requestAnimationFrame(() => { this._raf = 0; this._subs.forEach(fn => { try { fn(c); } catch (e) { console.error(e); } }); }); },
   settings() {
-    const d = { nom: 'Boucherie El Fen', societe: 'SAS BHVA', adresse: '24 place de Verdun, 59650 Villeneuve-d\'Ascq', tel: '09 80 99 33 39', siret: '', agrement: '', brotherW: 62, brotherH: 100, brotherPrixH: 40, brotherOrient: 'portrait', codePrix: '5624', fondDefaut: 'habituel', formatDefaut: 'A6', nomSurEtiquette: false, guides: true, veille: 4, logo: '', initiales: 'BHVA' };
+    const d = { nom: 'Boucherie El Fen', societe: 'SAS BHVA', adresse: '24 place de Verdun, 59650 Villeneuve-d\'Ascq', tel: '09 80 99 33 39', siret: '', agrement: '', brotherW: 62, brotherH: 100, brotherPrixH: 40, brotherOrient: 'portrait', ntfyTopic: '', fondDefaut: 'habituel', formatDefaut: 'A6', nomSurEtiquette: false, guides: true, veille: 4, logo: '', initiales: 'BHVA' };
     return Object.assign(d, this.get('reglages', 'boucherie') || {});
   },
   exportAll() { const o = { exportedAt: new Date().toISOString(), app: 'comptoir-boucherie', data: {} }; COLLS.forEach(c => { o.data[c] = {}; this.cache[c].forEach((v, k) => { const d = Object.assign({}, v); delete d.id; o.data[c][k] = d; }); }); return o; },
@@ -725,7 +750,18 @@ function unreadNotifs() { return Store.all('notifications').filter(n => !n.lu).s
 async function notify(entry) {
   const all = Store.all('notifications').sort((a, b) => (a.t || '').localeCompare(b.t || ''));
   for (const old of all.slice(0, Math.max(0, all.length - 120))) { try { await Store.remove('notifications', old.id); } catch (e) { } }
-  await Store.set('notifications', 'n-' + uid(), Object.assign({ t: new Date().toISOString(), lu: false }, entry));
+  await Store.set('notifications', 'n-' + uid(), Object.assign({ t: new Date().toISOString(), lu: false, de_: Store.deviceId() }, entry));
+  const txt = entry.type === 'prix' ? `${entry.nom} : ${fmtMoney(entry.de)} → ${fmtMoney(entry.a)}` : `${entry.nom}`;
+  sendPush(entry.type === 'prix' ? 'Prix modifié' : 'Nouveau produit', txt);
+}
+/* notification push (téléphones / iPad verrouillés) via ntfy.sh — gratuit, sans compte : l'appli ntfy abonnée au sujet reçoit une vraie notification avec son */
+function pushTopic() { const s = Store.settings(); return String(s.ntfyTopic || (typeof NTFY_TOPIC !== 'undefined' ? NTFY_TOPIC : '') || '').trim(); }
+async function sendPush(title, message, opts = {}) {
+  const topic = pushTopic(); if (!topic) return false;
+  try {
+    const r = await fetch('https://ntfy.sh', { method: 'POST', body: JSON.stringify(Object.assign({ topic, title, message, priority: 5, tags: ['bell'], click: location.href.split('#')[0].replace(/[^/]*$/, '') }, opts)) });
+    return r.ok;
+  } catch (e) { return false; }
 }
 
 function renderNav() {
@@ -1170,20 +1206,20 @@ async function saveProductForm(id) {
 /* ===================== application à part : PRIX BHVA GESTION (#gestion) ===================== */
 const ProdOpts = { cat: 'viande', q: '' };
 Views.gestion = function () {
-  if (!pinValid()) { if (!$('#pin-input')) askPin().then(ok => { if (ok) render(); else location.hash = '#prix'; }); return `<div class="card"><div class="empty"><strong>Code d'accès requis</strong><p class="muted">Entrez le code pour ouvrir la gestion des produits et des prix.</p></div></div>`; }
   const prods = Store.all('produits'); const cats = ['viande', 'fruits', 'epicerie'].filter(c => prods.some(p => p.cat === c));
   const cat = (cats.includes(ProdOpts.cat) || ProdOpts.cat === 'tous') ? ProdOpts.cat : (cats[0] || 'tous');
   const nq = normStr(ProdOpts.q);
   const list = prods.filter(p => (cat === 'tous' || p.cat === cat) && (!nq || normStr(p.name).includes(nq) || normStr(p.code || '').includes(nq))).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
   const un = unreadNotifs().length;
   return `
+  <div class="gest-top"><div><div class="eyebrow">Synchronisé avec le comptoir</div><h1>Prix BHVA</h1></div><button class="btn btn-primary" data-act="newp">${I.plus} Nouveau</button></div>
   <div class="gest-head">
-    <div class="spread"><div><div class="eyebrow">Application à part · synchronisée avec le comptoir</div><h1>Prix BHVA Gestion</h1></div><button class="btn btn-primary btn-lg" data-act="newp">${I.plus} Nouveau produit</button></div>
-    <div class="row"><div class="chips">${cats.map(c => `<button class="chip ${cat === c ? 'on' : ''}" data-act="pcat" data-v="${c}">${CAT_LABEL[c]}</button>`).join('')}<button class="chip ${cat === 'tous' ? 'on' : ''}" data-act="pcat" data-v="tous">Tous</button></div><div class="search fill" style="min-width:180px">${I.search}<input class="input input-lg" id="prod-search" placeholder="Rechercher…" value="${esc(ProdOpts.q)}" data-on="psearch" autocomplete="off"></div></div>
-    <p class="help">Changez le prix dans la case : il est enregistré en quittant la case et le comptoir reçoit une notification. Crayon : nom, unité, origine, offres (dès 2 kg… ou lot). Les étiquettes en attente suivent.</p>
+    <div class="search">${I.search}<input class="input input-lg" id="prod-search" placeholder="Rechercher un produit…" value="${esc(ProdOpts.q)}" data-on="psearch" autocomplete="off"></div>
+    <div class="chips">${cats.map(c => `<button class="chip ${cat === c ? 'on' : ''}" data-act="pcat" data-v="${c}">${CAT_LABEL[c]}</button>`).join('')}<button class="chip ${cat === 'tous' ? 'on' : ''}" data-act="pcat" data-v="tous">Tous</button></div>
   </div>
-  <div class="card">${!prods.length ? `<div class="empty"><strong>Le catalogue est vide.</strong><button class="btn btn-primary" data-act="seed">Charger les 246 produits de départ</button></div>` : ''}${list.length ? list.map(p => `<div class="gest-row"><div><div class="n">${esc(p.name)}${p.actif === false ? ' <span class="pill pill-neutral">masqué</span>' : ''}</div><div class="s">${esc(p.cat === 'viande' ? (ESPECE_TAG[p.espece] || 'Viande') : CAT_LABEL[p.cat] || '')} · ${esc(UNIT_LABEL[p.unit] || p.unit)}${productLabelOrigin(p).lines[0] ? ' · ' + esc(productLabelOrigin(p).lines[0]) : ''}${(p.promos || []).length ? ' · ' + (p.promos || []).map(pr => esc(promoText(p, pr))).join(' · ') : ''}</div></div><input class="input num" type="number" step="0.01" min="0" inputmode="decimal" value="${p.price ?? ''}" data-on="price" data-id="${p.id}" id="price-${p.id}" aria-label="Prix de ${esc(p.name)}"><button class="icon-btn" data-act="editp" data-id="${p.id}" aria-label="Modifier">${I.pencil}</button></div>`).join('') : `<div class="empty"><strong>Aucun produit.</strong></div>`}</div>
-  ${window.FORCE_GESTION ? `<p class="help" style="margin-top:12px">${Store.mode === 'local' ? 'Les prix sont enregistrés sur ce téléphone seulement : branchez la synchronisation dans Réglages du comptoir pour que l\'iPad les reçoive.' : 'Synchronisé avec le comptoir : chaque changement est envoyé à l\'iPad.'}</p>` : `<div class="card card-pad stack" style="margin-top:14px"><h3>Installer sur ce téléphone</h3>
+  <p class="help" style="margin:8px 0 10px">Tapez le nouveau prix dans la case (ex. 28,80) : il est enregistré dès que vous quittez la case, et le comptoir reçoit l'alerte. Crayon : nom, unité, origine, offres (dès 2 kg… ou lot).</p>
+  <div class="card">${!prods.length ? `<div class="empty"><strong>Le catalogue est vide.</strong><button class="btn btn-primary" data-act="seed">Charger les 246 produits de départ</button></div>` : ''}${list.length ? list.map(p => `<div class="gest-row"><div><div class="n">${esc(p.name)}${p.actif === false ? ' <span class="pill pill-neutral">masqué</span>' : ''}</div><div class="s">${esc(p.cat === 'viande' ? (ESPECE_TAG[p.espece] || 'Viande') : CAT_LABEL[p.cat] || '')} · ${esc(UNIT_LABEL[p.unit] || p.unit)}${productLabelOrigin(p).lines[0] ? ' · ' + esc(productLabelOrigin(p).lines[0]) : ''}${(p.promos || []).length ? ' · ' + (p.promos || []).map(pr => esc(promoText(p, pr))).join(' · ') : ''}</div></div><input class="input num" type="text" inputmode="decimal" enterkeyhint="done" value="${p.price == null ? '' : p.price.toFixed(2).replace('.', ',')}" data-on="price" data-id="${p.id}" id="price-${p.id}" aria-label="Prix de ${esc(p.name)}"><button class="icon-btn" data-act="editp" data-id="${p.id}" aria-label="Modifier">${I.pencil}</button></div>`).join('') : `<div class="empty"><strong>Aucun produit.</strong></div>`}</div>
+  ${window.FORCE_GESTION ? `<p class="help" style="margin-top:12px">${Store.mode === 'local' ? 'PAS SYNCHRONISÉ : les prix restent sur ce téléphone. Vérifiez la connexion internet puis touchez la pastille rouge en haut.' : 'Synchronisé : chaque changement part immédiatement au comptoir et en notification.'}</p>` : `<div class="card card-pad stack" style="margin-top:14px"><h3>Installer sur ce téléphone</h3>
     <label class="check"><input type="checkbox" id="opt-gestdev" data-on="gestdev" ${LS.get('gestionDevice', false) ? 'checked' : ''}> Sur cet appareil, ouvrir directement la gestion des prix (jamais le comptoir)</label>
     <p class="help">Cochez cette case, puis dans le navigateur : Partager → « Ajouter à l'écran d'accueil » (iPhone : Safari ; Android : Chrome, menu ⋮ → « Ajouter à l'écran d'accueil »). L'icône ouvrira cette application, synchronisée en direct avec le comptoir.${un ? ` · ${un} changement(s) pas encore vu(s) au comptoir.` : ''}</p>
     <div class="row"><button class="btn btn-sm" data-act="copylink">Copier le lien de l'application prix</button><a class="btn btn-sm btn-ghost" href="#accueil" data-act="leavegest">Aller au comptoir</a></div></div>`}`;
@@ -1701,7 +1737,12 @@ Views.reglages = function () {
     <div class="card card-pad stack"><h2>Synchronisation entre appareils</h2>
       <p class="help">${Store.mode === 'firebase' ? '<span class="pill pill-ok">Connecté</span> Base partagée Firebase : iPad, téléphone et PC voient les mêmes données.' : Store.mode === 'db' ? 'Base partagée claude.ai.' : 'Pour l\'instant, les données restent sur cet appareil. Collez ici la configuration Firebase (donnée par Claude lors de la mise en place) pour partager les données entre l\'iPad, le téléphone et le PC.'}</p>
       ${Store.mode === 'firebase' ? `<button class="btn btn-danger btn-sm" data-act="fbdisconnect">Déconnecter cet appareil de la base</button>` : (typeof FIREBASE_CONFIG !== 'undefined' && FIREBASE_CONFIG) ? `<button class="btn btn-primary" data-act="fbreconnect">Connecter cet appareil (mot de passe de la boucherie)</button>` : `<textarea class="input" id="fb-config" rows="4" placeholder='{"apiKey": "...", "authDomain": "...", "projectId": "...", "appId": "..."}'></textarea><button class="btn btn-primary" data-act="fbconnect">Connecter la synchronisation</button>`}
-      <div class="form-grid" style="margin-top:6px">${fld('Code demandé au comptoir pour modifier un produit (crayon) — jamais demandé dans l\'application Prix BHVA', inp('codePrix', s.codePrix || '5624', 'inputmode="numeric" form="reg-form"'))}</div>
+    </div>
+    <div class="card card-pad stack"><h2>Alertes et notifications</h2>
+      <p class="help"><strong>Au comptoir</strong> : dès qu'un prix change depuis un autre appareil, l'écran passe en alerte jaune avec une sonnerie qui ne s'arrête que lorsqu'on appuie sur « OK, vu ». L'écran de l'iPad reste allumé tant que l'application est ouverte.</p>
+      <p class="help"><strong>Sur les téléphones / iPad verrouillés</strong> : installez l'application gratuite <strong>ntfy</strong> (App Store / Play Store), ouvrez-la, « + » puis abonnez-vous au sujet ci-dessous. Chaque changement de prix arrive alors comme une vraie notification (son, écran verrouillé, réglable dans Réglages iOS → Notifications → ntfy).</p>
+      <div class="form-grid">${fld('Sujet ntfy (identique sur tous les appareils)', inp('ntfyTopic', pushTopic(), 'form="reg-form" autocapitalize="off" autocorrect="off" spellcheck="false"'))}</div>
+      <div class="row"><button class="btn" data-act="pushtest">Envoyer une notification de test</button><button class="btn" data-act="alarmtest">Tester l'alerte sonore</button></div>
     </div>
     <div class="card card-pad stack"><h2>Données</h2><div class="kv"><dt>Enregistrement</dt><dd>${Store.mode === 'db' ? 'Base partagée du site (tous vos appareils)' : 'Cet appareil uniquement'}</dd><dt>Produits</dt><dd class="num">${Store.count('produits')}</dd><dt>Réceptions / lots</dt><dd class="num">${Store.count('receptions')} / ${Store.count('fabrications')}</dd><dt>Commandes</dt><dd class="num">${Store.count('commandes')}</dd></div>
       <a class="btn btn-primary" href="#gestion">${I.list} Ouvrir Prix BHVA Gestion (application à part)</a>
@@ -1717,7 +1758,7 @@ async function saveSettingsForm() {
   const f = $('#reg-form'); if (!f.reportValidity()) return; const o = formData(f);
   const preset = o.brotherPreset; const h = preset === '62x100' ? 100 : preset === '62x29' ? 29 : (num(o.brotherH) || 100);
   const prev = Store.settings();
-  try { await Store.set('reglages', 'boucherie', Object.assign({}, prev, { nom: o.nom.trim(), societe: (o.societe || '').trim(), initiales: (o.initiales || 'BHVA').trim().toUpperCase().slice(0, 4) || 'BHVA', tel: o.tel.trim(), adresse: o.adresse.trim(), siret: o.siret.trim(), agrement: o.agrement.trim(), veille: num(o.veille) ?? 4, formatDefaut: o.formatDefaut, fondDefaut: o.fondDefaut, nomSurEtiquette: !!o.nomSurEtiquette, brotherW: 62, brotherH: h, brotherPrixH: num(o.brotherPrixH) || 40, brotherOrient: o.brotherOrient, codePrix: (o.codePrix || '').trim() || '5624' })); toast('Réglages enregistrés', 'ok'); Standby.arm(); } catch (e) { }
+  try { await Store.set('reglages', 'boucherie', Object.assign({}, prev, { nom: o.nom.trim(), societe: (o.societe || '').trim(), initiales: (o.initiales || 'BHVA').trim().toUpperCase().slice(0, 4) || 'BHVA', tel: o.tel.trim(), adresse: o.adresse.trim(), siret: o.siret.trim(), agrement: o.agrement.trim(), veille: num(o.veille) ?? 4, formatDefaut: o.formatDefaut, fondDefaut: o.fondDefaut, nomSurEtiquette: !!o.nomSurEtiquette, brotherW: 62, brotherH: h, brotherPrixH: num(o.brotherPrixH) || 40, brotherOrient: o.brotherOrient, ntfyTopic: (o.ntfyTopic || '').trim() })); toast('Réglages enregistrés', 'ok'); Standby.arm(); } catch (e) { }
 }
 async function backupAll() { const o = Store.exportAll(); await deliverText(JSON.stringify(o, null, 1), `sauvegarde-boucherie-${todayStr()}.json`); }
 async function wipeAll() {
@@ -1727,24 +1768,11 @@ async function wipeAll() {
 }
 
 /* ===================== actions ===================== */
-/* code d'accès : demandé uniquement depuis le comptoir (crayon / nouveau produit / page gestion), jamais dans l'application Prix BHVA */
-let _pinUntil = 0, _pinResolve = null, _pinPromise = null;
-function pinValid() { return !!window.FORCE_GESTION || Date.now() < _pinUntil; }
-function askPin() {
-  if (pinValid()) return Promise.resolve(true);
-  if (_pinPromise && $('#pin-input')) return _pinPromise;
-  _pinPromise = new Promise(resolve => {
-    _pinResolve = resolve;
-    openModal({ title: 'Code d\'accès', narrow: true, body: `<p>Entrez le code pour modifier les produits et les prix.</p><input class="input input-lg" id="pin-input" inputmode="numeric" type="password" placeholder="Code" autocomplete="off">`, footer: `<button class="btn btn-primary" data-act="pinok">Entrer</button>`, onClose: () => { const r = _pinResolve; _pinResolve = null; _pinPromise = null; if (r) r(false); } });
-    const i = $('#pin-input'); if (i) { i.focus(); i.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); Actions.pinok(); } }); }
-  });
-  return _pinPromise;
-}
 const Actions = {
   seed: () => seedCatalogue(),
   addq: el => { const p = Store.get('produits', el.dataset.id); if (!p) return; const f = formatFor(p); PriceQueue.add(p.id, f, curBg()); toast(`${p.name} ajouté · ${isBrotherFmt(f) ? 'Brother 62 mm' : f + ' · HP'}`); render(); },
-  editp: async (el, e) => { e.stopPropagation(); if (!(await askPin())) return; openProductEditor(el.dataset.id); },
-  newp: async () => { if (!(await askPin())) return; openProductEditor(null, { cat: PriceOpts.cat === 'tous' ? 'viande' : PriceOpts.cat }); },
+  editp: (el, e) => { e.stopPropagation(); openProductEditor(el.dataset.id); },
+  newp: () => openProductEditor(null, { cat: PriceOpts.cat === 'tous' ? 'viande' : PriceOpts.cat }),
   setfmt: el => { PriceOpts.fmt = el.dataset.v || null; LS.set('fmt', PriceOpts.fmt); render(); },
   setbg: el => { PriceOpts.bg = el.dataset.v; LS.set('bg', el.dataset.v); render(); },
   setcat: el => { PriceOpts.cat = el.dataset.v; LS.set('cat', el.dataset.v); render(); },
@@ -1835,7 +1863,9 @@ const Actions = {
   fbconnect: () => { const t = ($('#fb-config') || {}).value || ''; const m = t.match(/\{[\s\S]*\}/); if (!m) { toast('Collez la configuration complète, entre accolades.', 'err'); return; } let cfg; try { cfg = JSON.parse(m[0].replace(/(\w+)\s*:/g, '"$1":').replace(/'/g, '"').replace(/,\s*}/g, '}')); } catch (e) { toast('Configuration illisible : ' + e.message, 'err', 6000); return; } if (!cfg.projectId || !cfg.apiKey) { toast('Il manque projectId ou apiKey.', 'err'); return; } LS.set('firebase', cfg); toast('Configuration enregistrée, rechargement…', 'ok'); setTimeout(() => location.reload(), 800); },
   fbdisconnect: async () => { if (await confirmDialog('Déconnecter cet appareil de la base partagée ? Les données resteront dans la base, cet appareil repassera en mode local.', { danger: true, ok: 'Déconnecter' })) { try { if (window.firebase && firebase.apps.length) await firebase.auth().signOut(); } catch (e) { } LS.del('firebase'); LS.set('fbSkip', true); location.reload(); } },
   fbreconnect: () => { LS.del('fbSkip'); location.reload(); },
-  pinok: () => { const v = (($('#pin-input') || {}).value || '').trim(); if (v === String(Store.settings().codePrix || '5624')) { _pinUntil = Date.now() + 5 * 60 * 1000; const r = _pinResolve; _pinResolve = null; _pinPromise = null; closeModal(); if (r) r(true); } else { toast('Code incorrect', 'err'); const i = $('#pin-input'); if (i) { i.value = ''; i.focus(); } } },
+  pushtest: async () => { const ok = await sendPush('Test BHVA', 'Les notifications fonctionnent ✔︎'); toast(ok ? 'Notification envoyée — regardez l\'appli ntfy' : 'Envoi impossible (connexion internet ?)', ok ? 'ok' : 'err', 5000); },
+  alarmtest: () => Alarm.start({ type: 'prix', nom: 'Test', de: 1, a: 2, t: new Date().toISOString() }, true),
+  alarmok: async () => { Alarm.stop(); for (const n of unreadNotifs()) await Store.patch('notifications', n.id, { lu: true }); render(); },
   wipe: () => wipeAll()
 };
 const Inputs = {
@@ -1845,7 +1875,7 @@ const Inputs = {
   promos: el => { PriceOpts.promos = el.checked; LS.set('promos', el.checked); render(); },
   guides: el => { PriceOpts.guides = el.checked; LS.set('guides', el.checked); render(); },
   marge: el => { PriceOpts.marge = el.checked; LS.set('marge', el.checked); render(); },
-  price: async el => { const v = num(el.value); const p = Store.get('produits', el.dataset.id); if (!p) return; if (v == null || v < 0) { el.value = p.price ?? ''; toast('Prix non valide — l\'ancien prix est conservé', 'err'); return; } if (p.price === v) return; const now = new Date().toISOString(); const hist = (p.historique || []).slice(-20).concat([{ t: now, de: p.price, a: v }]); await Store.patch('produits', el.dataset.id, { price: v, maj: now, majPrix: now, historique: hist }); toast(`${p.name} : ${fmtMoney(v)}${UNIT_LABEL[p.unit] || ''} enregistré`, 'ok', 1800); await notify({ type: 'prix', produitId: p.id, nom: p.name, de: p.price, a: v }); },
+  price: async el => { const v = num(el.value); const p = Store.get('produits', el.dataset.id); if (!p) return; if (v == null || v < 0) { el.value = p.price == null ? '' : p.price.toFixed(2).replace('.', ','); toast('Prix non valide — l\'ancien prix est conservé', 'err'); return; } el.value = v.toFixed(2).replace('.', ','); if (p.price === v) return; const now = new Date().toISOString(); const hist = (p.historique || []).slice(-20).concat([{ t: now, de: p.price, a: v }]); await Store.patch('produits', el.dataset.id, { price: v, maj: now, majPrix: now, historique: hist }); toast(`${p.name} : ${fmtMoney(v)}${UNIT_LABEL[p.unit] || ''} enregistré`, 'ok', 1800); await notify({ type: 'prix', produitId: p.id, nom: p.name, de: p.price, a: v }); },
   stmin: async el => { const v = num(el.value); const p = Store.get('produits', el.dataset.id); const s = Store.get('stock', el.dataset.id) || { qte: null, unite: p && p.unit === 'kg' ? 'kg' : 'piece' }; if (s.min === v) return; await Store.set('stock', el.dataset.id, Object.assign({}, s, { min: v, nom: p ? p.name : '' })); },
   recespece: el => { const box = $('#orig-fields'); if (box) box.innerHTML = originFields(el.value, { ne: 'France', eleve: 'France', abattu: 'France' }); },
   fabrecette: el => { const f = $('#fab-form'); if (f) f.dataset.auto = '1'; applyRecetteToForm(el.value); },
@@ -1886,14 +1916,43 @@ function openNotifs() {
   openModal({ title: 'Notifications', narrow: true, body: all.length ? `<div class="list">${all.map(n => `<div class="list-item" style="${n.lu ? 'opacity:.6' : ''}"><span class="pill ${n.lu ? 'pill-neutral' : 'pill-warn'}">${n.lu ? 'lu' : 'nouveau'}</span><div class="main"><div class="title">${line(n)}</div><div class="sub">${esc(fmtDateTime(n.t))}</div></div>${n.lu ? '' : `<button class="btn btn-sm" data-act="notifread" data-id="${n.id}">OK</button>`}</div>`).join('')}</div>` : '<div class="empty"><strong>Aucune notification.</strong><span>Les changements de prix faits depuis l\'application de gestion apparaîtront ici.</span></div>', footer: `<button class="btn" data-close="1">Fermer</button>${unreadNotifs().length ? '<button class="btn btn-primary" data-act="notifsread">Tout marquer comme vu</button>' : ''}` });
 }
 let _seenNotifs = null;
-Store.onChange(c => { if (c !== 'notifications') return; const ids = new Set(Store.all('notifications').map(n => n.id)); if (_seenNotifs) { const fresh = Store.all('notifications').filter(n => !_seenNotifs.has(n.id) && !n.lu); if (fresh.length && currentRoute() !== 'gestion') { const n = fresh[0]; toast(n.type === 'prix' ? `Prix modifié : ${n.nom} → ${fmtMoney(n.a)}` : `Nouveau : ${n.nom}`, 'ok', 6000); } } _seenNotifs = ids; });
+Store.onChange(c => { if (c !== 'notifications') return; const ids = new Set(Store.all('notifications').map(n => n.id)); if (_seenNotifs) { const fresh = Store.all('notifications').filter(n => !_seenNotifs.has(n.id) && !n.lu); if (fresh.length && !window.FORCE_GESTION) { const mine = Store.deviceId(); const ext = fresh.filter(n => n.de_ !== mine); if (ext.length) Alarm.start(ext[0]); } } _seenNotifs = ids; });
 
 /* ===================== écran d'attente ===================== */
+/* ===================== ALERTE SONORE PERSISTANTE (comptoir) ===================== */
+const Alarm = {
+  ctx: null, timer: null, el: null, unlocked: false,
+  unlock() { try { if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); if (this.ctx.state === 'suspended') this.ctx.resume(); const b = this.ctx.createBuffer(1, 1, 22050); const s = this.ctx.createBufferSource(); s.buffer = b; s.connect(this.ctx.destination); s.start(0); this.unlocked = true; const h = $('#sound-hint'); if (h) h.remove(); } catch (e) { } },
+  beep() {
+    try {
+      if (!this.ctx) return; if (this.ctx.state === 'suspended') this.ctx.resume();
+      const t0 = this.ctx.currentTime;
+      [[880, 0], [1175, .18], [880, .36], [1175, .54]].forEach(([f, dt]) => { const o = this.ctx.createOscillator(); const g = this.ctx.createGain(); o.type = 'square'; o.frequency.value = f; g.gain.setValueAtTime(0.0001, t0 + dt); g.gain.exponentialRampToValueAtTime(0.5, t0 + dt + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.16); o.connect(g); g.connect(this.ctx.destination); o.start(t0 + dt); o.stop(t0 + dt + 0.18); });
+    } catch (e) { }
+  },
+  start(n, test = false) {
+    if (window.FORCE_GESTION) return;
+    Standby.hide && Standby.el && Standby.hide();
+    const txt = n.type === 'prix' ? `${esc(n.nom)}<br><span class="alarm-price">${esc(fmtMoney(n.de))} → ${esc(fmtMoney(n.a))}</span>` : `Nouveau produit : ${esc(n.nom)}`;
+    if (!this.el) { this.el = document.createElement('div'); this.el.className = 'alarm'; document.body.appendChild(this.el); }
+    const nb = unreadNotifs().length;
+    this.el.innerHTML = `<div class="alarm-ico">${I.bell}</div><div class="alarm-title">${n.type === 'prix' ? 'PRIX MODIFIÉ' : 'NOUVEAU PRODUIT'}</div><div class="alarm-txt">${txt}</div><div class="alarm-sub">${esc(fmtDateTime(n.t))}${nb > 1 ? ` · ${nb} changements à voir` : ''}${test ? ' · test' : ''}</div><button class="btn alarm-ok" data-act="alarmok">OK, vu — arrêter la sonnerie</button>`;
+    clearInterval(this.timer); this.beep(); this.timer = setInterval(() => this.beep(), 1500);
+    try { navigator.vibrate && navigator.vibrate([300, 200, 300]); } catch (e) { }
+  },
+  stop() { clearInterval(this.timer); this.timer = null; if (this.el) { this.el.remove(); this.el = null; } }
+};
+['pointerdown', 'touchend', 'keydown'].forEach(ev => document.addEventListener(ev, () => { if (!Alarm.unlocked) Alarm.unlock(); }, { passive: true }));
+function soundHint() { if (window.FORCE_GESTION || Alarm.unlocked || $('#sound-hint')) return; const d = document.createElement('div'); d.id = 'sound-hint'; d.className = 'sound-hint'; d.innerHTML = `${I.bell} Touchez l'écran une fois pour activer la sonnerie des alertes`; d.addEventListener('pointerdown', () => Alarm.unlock()); document.body.appendChild(d); }
+/* écran toujours allumé (iPad comptoir) */
+const Wake = { lock: null, async on() { if (window.FORCE_GESTION || !('wakeLock' in navigator)) return; try { this.lock = await navigator.wakeLock.request('screen'); this.lock.addEventListener('release', () => { this.lock = null; }); } catch (e) { } } };
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { Wake.on(); try { Alarm.ctx && Alarm.ctx.state === 'suspended' && Alarm.ctx.resume(); } catch (e) { } } });
+
 const Standby = {
   timer: 0, el: null, clock: 0,
   arm() { clearTimeout(this.timer); const m = Number(Store.settings().veille); if (!m || m <= 0 || this.el) return; this.timer = setTimeout(() => this.show(), m * 60000); },
   show() {
-    if (this.el || _modal || currentRoute() === 'gestion') { this.arm(); return; }
+    if (this.el || _modal || Alarm.el || currentRoute() === 'gestion') { this.arm(); return; }
     const el = document.createElement('div'); el.className = 'standby'; el.id = 'standby'; this.el = el; document.body.appendChild(el);
     const draw = () => {
       const t = todayStr(); const now = new Date();
@@ -1928,7 +1987,7 @@ const Standby = {
     window.addEventListener('hashchange', () => { closeModal(); render(); });
     Store.onChange(() => render());
     _seenNotifs = new Set(Store.all('notifications').map(n => n.id));
-    render(); Standby.arm();
+    render(); Standby.arm(); Wake.on(); soundHint();
   } catch (e) { console.error(e); $('#view').innerHTML = `<div class="notice crit">Le site n'a pas pu démarrer : ${esc(e.message)}</div>`; }
 })();
 
