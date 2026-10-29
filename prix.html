@@ -104,7 +104,7 @@ body.gestion-mode .nav,body.gestion-mode .bell,body.gestion-mode .brand-sub,body
 body.gestion-mode .masthead-inner{height:50px}
 body.gestion-mode .brand-mark{color:#1b1917}
 .notif-banner{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:var(--radius-s);background:#ffd60a;color:#111;font-weight:600;margin-bottom:12px}
-.notif-banner .btn{background:#111;color:#fff;border-color:#111}
+.notif-banner>svg{width:22px;height:22px;flex:none}.notif-banner .btn{background:#111;color:#fff;border-color:#111;white-space:nowrap}.notif-banner .fill{line-height:1.3}
 .prod .newp{position:absolute;top:8px;left:8px;background:#ffd60a;color:#111;font-weight:800;font-size:.66rem;padding:2px 7px;border-radius:999px}
 .gest-row{display:grid;grid-template-columns:minmax(0,1fr) 110px auto;gap:8px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line)}
 .gest-row .n{font-weight:600;line-height:1.2}
@@ -1845,7 +1845,7 @@ const Inputs = {
   promos: el => { PriceOpts.promos = el.checked; LS.set('promos', el.checked); render(); },
   guides: el => { PriceOpts.guides = el.checked; LS.set('guides', el.checked); render(); },
   marge: el => { PriceOpts.marge = el.checked; LS.set('marge', el.checked); render(); },
-  price: async el => { const v = num(el.value); const p = Store.get('produits', el.dataset.id); if (!p || p.price === v) return; const now = new Date().toISOString(); const hist = (p.historique || []).slice(-20).concat([{ t: now, de: p.price, a: v }]); await Store.patch('produits', el.dataset.id, { price: v, maj: now, majPrix: now, historique: hist }); toast(`${p.name} : ${fmtMoney(v)}${UNIT_LABEL[p.unit] || ''} enregistré`, 'ok', 1800); await notify({ type: 'prix', produitId: p.id, nom: p.name, de: p.price, a: v }); },
+  price: async el => { const v = num(el.value); const p = Store.get('produits', el.dataset.id); if (!p) return; if (v == null || v < 0) { el.value = p.price ?? ''; toast('Prix non valide — l\'ancien prix est conservé', 'err'); return; } if (p.price === v) return; const now = new Date().toISOString(); const hist = (p.historique || []).slice(-20).concat([{ t: now, de: p.price, a: v }]); await Store.patch('produits', el.dataset.id, { price: v, maj: now, majPrix: now, historique: hist }); toast(`${p.name} : ${fmtMoney(v)}${UNIT_LABEL[p.unit] || ''} enregistré`, 'ok', 1800); await notify({ type: 'prix', produitId: p.id, nom: p.name, de: p.price, a: v }); },
   stmin: async el => { const v = num(el.value); const p = Store.get('produits', el.dataset.id); const s = Store.get('stock', el.dataset.id) || { qte: null, unite: p && p.unit === 'kg' ? 'kg' : 'piece' }; if (s.min === v) return; await Store.set('stock', el.dataset.id, Object.assign({}, s, { min: v, nom: p ? p.name : '' })); },
   recespece: el => { const box = $('#orig-fields'); if (box) box.innerHTML = originFields(el.value, { ne: 'France', eleve: 'France', abattu: 'France' }); },
   fabrecette: el => { const f = $('#fab-form'); if (f) f.dataset.auto = '1'; applyRecetteToForm(el.value); },
