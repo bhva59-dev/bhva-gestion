@@ -1778,7 +1778,8 @@ Views.reglages = function () {
       <p class="help"><strong>Au comptoir</strong> : dès qu'un prix change depuis un autre appareil, l'écran passe en alerte jaune avec une sonnerie qui ne s'arrête que lorsqu'on appuie sur « OK, vu ». L'écran de l'iPad reste allumé tant que l'application est ouverte.</p>
       <p class="help"><strong>Sur les téléphones / iPad verrouillés</strong> : installez l'application gratuite <strong>ntfy</strong> (App Store / Play Store), ouvrez-la, « + » puis abonnez-vous au sujet ci-dessous. Chaque changement de prix arrive alors comme une vraie notification (son, écran verrouillé, réglable dans Réglages iOS → Notifications → ntfy).</p>
       <div class="form-grid">${fld('Sujet ntfy (identique sur tous les appareils)', inp('ntfyTopic', pushTopic(), 'form="reg-form" autocapitalize="off" autocorrect="off" spellcheck="false"'))}</div>
-      <div class="row"><button class="btn" data-act="pushtest">Envoyer une notification de test</button><button class="btn" data-act="alarmtest">Tester l'alerte sonore</button></div>
+      <p class="help"><strong>Notifications iOS de l'application elle-même</strong> : ${Notif.state() === 'granted' ? '<span class="pill pill-ok">activées sur cet appareil</span>' : Notif.state() === 'denied' ? '<span class="pill pill-warn">refusées</span> — autorisez-les dans Réglages iOS → Notifications → BHVA' : 'pas encore demandées sur cet appareil'}. ${Notif.standalone() ? '' : 'Sur iPad, il faut d\'abord ouvrir l\'application depuis son icône sur l\'écran d\'accueil.'}</p>
+      <div class="row"><button class="btn btn-primary" data-act="notifask">${I.bell} Activer les notifications sur cet appareil</button><button class="btn" data-act="pushtest">Test notification ntfy</button><button class="btn" data-act="alarmtest">Tester l'alerte sonore</button></div>
     </div>
     <div class="card card-pad stack"><h2>Données</h2><div class="kv"><dt>Enregistrement</dt><dd>${Store.mode === 'db' ? 'Base partagée du site (tous vos appareils)' : 'Cet appareil uniquement'}</dd><dt>Produits</dt><dd class="num">${Store.count('produits')}</dd><dt>Réceptions / lots</dt><dd class="num">${Store.count('receptions')} / ${Store.count('fabrications')}</dd><dt>Commandes</dt><dd class="num">${Store.count('commandes')}</dd></div>
       <a class="btn btn-primary" href="#gestion">${I.list} Ouvrir Prix BHVA Gestion (application à part)</a>
@@ -1900,6 +1901,7 @@ const Actions = {
   fbdisconnect: async () => { if (await confirmDialog('Déconnecter cet appareil de la base partagée ? Les données resteront dans la base, cet appareil repassera en mode local.', { danger: true, ok: 'Déconnecter' })) { try { if (window.firebase && firebase.apps.length) await firebase.auth().signOut(); } catch (e) { } LS.del('firebase'); LS.set('fbSkip', true); location.reload(); } },
   fbreconnect: () => { LS.del('fbSkip'); location.reload(); },
   iosshare: () => iosShare(),
+  notifask: () => Notif.ask(),
   pushtest: async () => { const ok = await sendPush('Test BHVA', 'Les notifications fonctionnent ✔︎'); toast(ok ? 'Notification envoyée — regardez l\'appli ntfy' : 'Envoi impossible (connexion internet ?)', ok ? 'ok' : 'err', 5000); },
   alarmtest: () => Alarm.start({ type: 'prix', nom: 'Test', de: 1, a: 2, t: new Date().toISOString() }, true),
   alarmok: async () => { Alarm.stop(); for (const n of unreadNotifs()) await Store.patch('notifications', n.id, { lu: true }); render(); },
@@ -1975,6 +1977,25 @@ function makeAlarmWav() {
   new Int16Array(buf, 44).set(data);
   return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
 }
+/* notifications système (iOS : seulement quand l'appli est installée sur l'écran d'accueil) */
+const Notif = {
+  reg: null,
+  async init() { if (!('serviceWorker' in navigator)) return; try { this.reg = await navigator.serviceWorker.register('sw.js'); } catch (e) { console.warn('sw', e); } },
+  supported() { return 'Notification' in window && 'serviceWorker' in navigator; },
+  state() { return this.supported() ? Notification.permission : 'unsupported'; },
+  standalone() { return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; },
+  async ask() {
+    if (!this.supported()) { toast(this.standalone() ? 'Cet appareil ne gère pas les notifications web.' : 'Installez d\'abord l\'application sur l\'écran d\'accueil (Partager → Sur l\'écran d\'accueil), puis ouvrez-la depuis son icône.', 'err', 7000); return; }
+    let p = 'default'; try { p = await Notification.requestPermission(); } catch (e) { }
+    if (p === 'granted') { toast('Notifications activées sur cet appareil', 'ok'); await this.show('BHVA · notifications activées', 'Vous recevrez une alerte à chaque changement de prix.'); }
+    else toast('Notifications refusées : autorisez-les dans Réglages → Notifications → BHVA', 'err', 7000);
+    render();
+  },
+  async show(title, body, tag) {
+    if (this.state() !== 'granted') return false;
+    try { const reg = this.reg || await navigator.serviceWorker.ready; await reg.showNotification(title, { body, tag: tag || 'bhva-' + Date.now(), renotify: true, requireInteraction: true, icon: 'icons/bhva-180.png', badge: 'icons/bhva-180.png' }); return true; } catch (e) { try { new Notification(title, { body }); return true; } catch (e2) { return false; } }
+  }
+};
 const Alarm = {
   ctx: null, timer: null, el: null, unlocked: false, audio: null,
   player() { if (!this.audio) { const a = new Audio(makeAlarmWav()); a.loop = true; a.volume = 1; a.preload = 'auto'; a.setAttribute('playsinline', ''); this.audio = a; } return this.audio; },
@@ -2006,12 +2027,14 @@ const Alarm = {
     const nb = unreadNotifs().length;
     this.el.innerHTML = `<div class="alarm-ico">${I.bell}</div><div class="alarm-title">${n.type === 'prix' ? 'PRIX MODIFIÉ' : 'NOUVEAU PRODUIT'}</div><div class="alarm-txt">${txt}</div><div class="alarm-sub">${esc(fmtDateTime(n.t))}${nb > 1 ? ` · ${nb} changements à voir` : ''}${test ? ' · test' : ''}</div><button class="btn alarm-ok" data-act="alarmok">OK, vu — arrêter la sonnerie</button>${this.unlocked ? '' : '<div class="alarm-sub" style="margin-top:8px">Pas de son ? Touchez l\'écran une fois au démarrage de l\'application pour activer la sonnerie.</div>'}`;
     this.ring();
+    Notif.show(n.type === 'prix' ? 'PRIX MODIFIÉ' : 'NOUVEAU PRODUIT', n.type === 'prix' ? `${n.nom} : ${fmtMoney(n.de)} → ${fmtMoney(n.a)}` : n.nom, 'bhva-alerte');
+    this.el.onpointerdown = () => { if (!this.unlocked) this.unlock(); if (this.audio && this.audio.paused) this.ring(); };
     try { navigator.vibrate && navigator.vibrate([300, 200, 300]); } catch (e) { }
   },
   stop() { clearInterval(this.timer); this.timer = null; try { if (this.audio) { this.audio.pause(); this.audio.currentTime = 0; } } catch (e) { } if (this.el) { this.el.remove(); this.el = null; } }
 };
 ['pointerdown', 'touchend', 'keydown'].forEach(ev => document.addEventListener(ev, () => { if (!Alarm.unlocked) Alarm.unlock(); }, { passive: true }));
-function soundHint() { if (window.FORCE_GESTION || Alarm.unlocked || $('#sound-hint')) return; const d = document.createElement('div'); d.id = 'sound-hint'; d.className = 'sound-hint'; d.innerHTML = `${I.bell} Touchez l'écran une fois pour activer la sonnerie des alertes`; d.addEventListener('pointerdown', () => Alarm.unlock()); document.body.appendChild(d); }
+function soundHint() { if (window.FORCE_GESTION || Alarm.unlocked || $('#sound-hint')) return; const d = document.createElement('div'); d.id = 'sound-hint'; d.className = 'sound-hint'; d.innerHTML = `${I.bell} Touchez ici pour activer la sonnerie des alertes${Notif.supported() && Notif.state() === 'default' ? ' et les notifications' : ''}`; d.addEventListener('click', () => { if (Notif.supported() && Notif.state() === 'default') Notif.ask(); }); d.addEventListener('pointerdown', () => Alarm.unlock()); document.body.appendChild(d); }
 /* écran toujours allumé (iPad comptoir) */
 const Wake = { lock: null, async on() { if (window.FORCE_GESTION || !('wakeLock' in navigator)) return; try { this.lock = await navigator.wakeLock.request('screen'); this.lock.addEventListener('release', () => { this.lock = null; }); } catch (e) { } } };
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { Wake.on(); Store.refreshNotifs(); try { Alarm.ctx && Alarm.ctx.state === 'suspended' && Alarm.ctx.resume(); } catch (e) { } } });
@@ -2056,7 +2079,7 @@ const Standby = {
     window.addEventListener('hashchange', () => { closeModal(); render(); });
     Store.onChange(() => render());
     _seenNotifs = new Set(Store.all('notifications').map(n => n.id));
-    render(); Standby.arm(); Wake.on(); soundHint();
+    render(); Standby.arm(); Wake.on(); soundHint(); Notif.init();
   } catch (e) { console.error(e); $('#view').innerHTML = `<div class="notice crit">Le site n'a pas pu démarrer : ${esc(e.message)}</div>`; }
 })();
 
