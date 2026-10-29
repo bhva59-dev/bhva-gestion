@@ -1,0 +1,24 @@
+{
+ "name": "BHVA Comptoir",
+ "short_name": "BHVA",
+ "start_url": "./index.html",
+ "scope": "./",
+ "display": "standalone",
+ "orientation": "any",
+ "background_color": "#163bdc",
+ "theme_color": "#163bdc",
+ "lang": "fr",
+ "icons": [
+  {
+   "src": "icons/bhva-180.png",
+   "sizes": "180x180",
+   "type": "image/png"
+  },
+  {
+   "src": "icons/bhva-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "any"
+  }
+ ]
+}

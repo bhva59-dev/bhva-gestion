@@ -1,0 +1,24 @@
+{
+ "name": "Prix BHVA",
+ "short_name": "Prix BHVA",
+ "start_url": "./prix.html",
+ "scope": "./",
+ "display": "standalone",
+ "orientation": "portrait",
+ "background_color": "#111111",
+ "theme_color": "#111111",
+ "lang": "fr",
+ "icons": [
+  {
+   "src": "icons/prix-180.png",
+   "sizes": "180x180",
+   "type": "image/png"
+  },
+  {
+   "src": "icons/prix-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "any"
+  }
+ ]
+}
