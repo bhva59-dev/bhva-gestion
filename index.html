@@ -92,14 +92,18 @@ button{cursor:pointer}
 .brand-sub{font-size:.72rem;opacity:.85;letter-spacing:.06em;text-transform:uppercase}
 @media(max-width:640px){.brand-sub{display:none}.brand-name{font-size:1rem}}
 .mobile-bar{display:none}
-@media(max-width:899px){.mobile-bar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:35;align-items:center;gap:10px;background:var(--fg);color:var(--bg);padding:10px max(16px,env(safe-area-inset-right,0px)) max(10px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));box-shadow:0 -4px 16px rgba(0,0,0,.2)}.mobile-bar .btn{background:var(--accent);border-color:var(--accent);color:#fff}.page.has-bar{padding-bottom:90px}.toast-wrap{bottom:max(72px,calc(env(safe-area-inset-bottom,0px) + 72px))}}
+@media(max-width:899px){.queue-panel{display:none}.mobile-bar{display:flex;flex-wrap:wrap;position:fixed;left:0;right:0;bottom:0;z-index:35;align-items:center;gap:10px;background:var(--fg);color:var(--bg);padding:10px max(16px,env(safe-area-inset-right,0px)) max(10px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));box-shadow:0 -4px 16px rgba(0,0,0,.2)}.mobile-bar .btn{background:var(--accent);border-color:var(--accent);color:#fff}.page.has-bar{padding-bottom:90px}.toast-wrap{bottom:max(72px,calc(env(safe-area-inset-bottom,0px) + 72px))}}
 .mode-pill{margin-left:auto;font-size:.72rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:5px 10px;border-radius:999px;background:rgba(255,255,255,.18);white-space:nowrap}
 .mode-pill.local{background:rgba(0,0,0,.25)}.mode-pill.nosync{background:#d7263d;color:#fff;border-color:#d7263d;cursor:pointer;animation:blink 1.2s infinite}@keyframes blink{50%{opacity:.55}}
 .bell{position:relative;width:38px;height:38px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;display:grid;place-items:center;flex:none}
 .bell svg{width:18px;height:18px}
 .bell .bell-n{position:absolute;top:-4px;right:-4px;background:#ffd60a;color:#111;font-size:.7rem;font-weight:800;border-radius:999px;padding:1px 6px;min-width:18px}
 .bell.has{background:#fff;color:var(--accent)}
-body.gestion-mode .masthead{background:#1b1917}
+body.gestion-mode .masthead{background:#1b1917;position:static}
+body.gestion-mode .gest-head{position:static;box-shadow:none}
+body.gestion-mode .page{padding-left:12px;padding-right:12px}
+.fab-top{position:fixed;right:14px;bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:40;width:48px;height:48px;border-radius:50%;background:#111;color:#fff;border:0;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(0,0,0,.3)}.fab-top svg{width:20px;height:20px;transform:rotate(90deg)}
+body:not(.gestion-mode) .fab-top{display:none}
 body.gestion-mode .nav,body.gestion-mode .bell,body.gestion-mode .brand-sub,body.gestion-mode .mobile-bar{display:none}
 body.gestion-mode .masthead-inner{height:50px}
 body.gestion-mode .brand-mark{color:#1b1917}
@@ -270,6 +274,8 @@ table.table{width:100%;border-collapse:collapse;font-size:.9rem}
 .prod .edit svg{width:13px;height:13px}
 .prod .edit:hover{color:var(--accent);border-color:var(--accent)}
 .queue-panel{position:sticky;top:calc(var(--nav-h) + 48px + env(safe-area-inset-top,0px))}
+.mobile-bar .btn{padding:8px 10px}
+.evo-chart{background:#fff;border:1px solid var(--line);border-radius:var(--radius-s)}
 .queue-list{max-height:40vh;overflow:auto}
 .queue-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:.88rem}
 .queue-item .fmt{font-weight:700;font-size:.72rem;background:var(--surface-2);padding:2px 7px;border-radius:4px}
@@ -718,6 +724,7 @@ const isArtifact = () => !!(window.claude && typeof window.claude.use === 'funct
 
 /* ===================== icons ===================== */
 const I = {
+  chart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 6-7"/></svg>',
   home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8v9a2 2 0 0 1-2 2h-4v-7H9v7H5a2 2 0 0 1-2-2z"/></svg>',
   tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>',
   list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>',
@@ -749,6 +756,7 @@ const I = {
 const ROUTES = [
   { id: 'accueil', label: 'Ma journée', icon: 'home' },
   { id: 'prix', label: 'Affichage des prix', icon: 'tag' },
+  { id: 'evolution', label: 'Évolution des prix', icon: 'chart' },
   { id: 'trace', label: 'Traçabilité', icon: 'shield' },
   { id: 'dlc', label: 'Calendrier DLC', icon: 'clock' },
   { id: 'commandes', label: 'Commandes', icon: 'bag' },
@@ -911,10 +919,13 @@ Views.accueil = function () {
   const dlcs = dlcItems().filter(x => !x.traite && x.jours <= 1);
   const factDue = b.factures || 0; const stockLow = b.stocks || 0;
   const lots = Store.all('fabrications').filter(f => f.date === t).length;
+  const since7 = new Date(Date.now() - 7 * 86400000).toISOString();
+  const priceChanges = Store.all('produits').flatMap(p => (p.historique || []).filter(h => h.t >= since7).map(h => ({ p, h }))).sort((a, b) => b.h.t.localeCompare(a.h.t));
   const recs = Store.all('receptions').filter(r => r.date >= addDays(t, -2)).sort((a, b2) => b2.date.localeCompare(a.date)).slice(0, 5);
   const journal = Store.all('journal').sort((a, b2) => b2.date.localeCompare(a.date)).slice(0, 2).flatMap(d => (d.entries || []).slice(-4).reverse().map(e => Object.assign({ date: d.date }, e))).slice(0, 5);
   const mods = [
     { id: 'prix', t: 'Affichage des prix', d: 'Touchez un produit, il part sur la feuille. Formats A4 à A8 pour la HP, 62 mm pour la Brother.', tag: `${nbProd} produits`, alert: b.prix ? `${b.prix} en attente` : '' },
+    { id: 'evolution', t: 'Évolution des prix', d: 'Courbe du prix de chaque produit dans le temps, export CSV et impression.', tag: `${priceChanges.length} changement${priceChanges.length > 1 ? 's' : ''} sur 7 jours` },
     { id: 'trace', t: 'Traçabilité', d: 'Réceptions, lots fabriqués avec code recette, étiquettes 62 mm, registre.', tag: `${lots} lot${lots > 1 ? 's' : ''} fabriqué${lots > 1 ? 's' : ''} aujourd'hui` },
     { id: 'dlc', t: 'Calendrier DLC / DDM', d: 'Les dates de tous les lots sur un calendrier, du plus urgent au plus lointain.', tag: 'Mois · liste', alert: dlcs.length ? `${dlcs.length} à traiter` : '' },
     { id: 'commandes', t: 'Commandes clients', d: 'Date, heure, nom, texte libre et rappel.', tag: 'Préparation · retrait', alert: cmds.length ? `${cmds.length} aujourd'hui` : '' },
@@ -929,6 +940,7 @@ Views.accueil = function () {
     <div class="toolbar"><button class="btn btn-primary btn-lg" data-act="newreception">${I.download} Recevoir une livraison</button><a class="btn btn-lg" href="#prix">${I.print} Imprimer</a><button class="btn btn-lg" data-act="newfab">${I.cleaver} Fabriquer</button><button class="btn btn-lg" data-act="newfact" data-type="facture">${I.camera} Joindre une facture</button></div>
   </div>
   <div class="stats">
+    <a class="stat ${priceChanges.length ? 'alert' : ''}" href="#evolution" style="text-decoration:none"><span class="v num">${priceChanges.length}</span><span class="k">prix modifiés ces 7 jours${priceChanges.length ? ' · ' + esc(priceChanges[0].p.name) + ' ' + fmtMoney(priceChanges[0].h.de) + ' → ' + fmtMoney(priceChanges[0].h.a) : ''} · voir l'évolution</span></a>
     <div class="stat ${cmds.length ? 'alert' : ''}"><span class="v num">${cmds.length}</span><span class="k">commandes à préparer ou remettre</span></div>
     <div class="stat ${dlcs.length ? 'alert' : ''}"><span class="v num">${dlcs.length}</span><span class="k">dates à traiter (aujourd'hui, demain, dépassées)</span></div>
     <div class="stat ${factDue ? 'alert' : ''}"><span class="v num">${factDue}</span><span class="k">factures échues à payer</span></div>
@@ -963,7 +975,7 @@ const PriceQueue = {
   hp() { return this.items.filter(x => !isBrotherFmt(x.format)); },
   brother() { return this.items.filter(x => isBrotherFmt(x.format)); }
 };
-const PriceOpts = { fmt: LS.get('fmt', null), bg: LS.get('bg', null), guides: LS.get('guides', true), marge: LS.get('marge', true), promos: LS.get('promos', true), cat: LS.get('cat', 'viande'), q: '' };
+const PriceOpts = { fmt: LS.get('fmt', null), bg: LS.get('bg', null), guides: LS.get('guides', true), marge: LS.get('marge', true), promos: LS.get('promos', true), cat: 'tous', q: '' };
 function formatFor(p) { if (PriceOpts.fmt) return PriceOpts.fmt; return (p && p.cat === 'epicerie') ? BROTHER_FMT : (Store.settings().formatDefaut || 'A6'); }
 function curBg() { return PriceOpts.bg || Store.settings().fondDefaut || 'habituel'; }
 
@@ -1149,6 +1161,8 @@ Views.prix = function () {
   const printHp = canDirectPrint() ? `<button class="btn btn-primary btn-block" data-act="printdirect" ${hpTotal ? '' : 'disabled'}>${I.print} Imprimer sur la HP · ${sheets.length} feuille${sheets.length > 1 ? 's' : ''}</button>` : `<button class="btn btn-primary btn-block" data-act="printpdf" ${hpTotal ? '' : 'disabled'}>${I.print} HP · PDF ${sheets.length} feuille${sheets.length > 1 ? 's' : ''} A4</button>`;
   const printBr = canDirectPrint() ? `<button class="btn btn-dark btn-block" data-act="bprintdirect" ${brTotal ? '' : 'disabled'}>${I.print} Imprimer sur la Brother · ${brTotal}</button>` : `<button class="btn btn-dark btn-block" data-act="bprintpdf" ${brTotal ? '' : 'disabled'}>${I.print} Brother · PDF ${brTotal} étiquette${brTotal > 1 ? 's' : ''} 62 × ${s.brotherPrixH || 40} mm</button>`;
   const brPrev = brItems.length ? brotherPricePages([Object.assign({}, brItems[0], { copies: 1 })]) : null;
+  const ctx = { total, hpTotal, brTotal, sheets, hpItems, brItems, brPrev, printHp, printBr, s, qItem };
+  _lastPrixCtx = ctx;
   return `
   <div class="page-head"><div><div class="eyebrow">HP : feuilles A4 · Brother : rouleau 62 mm</div><h1>Affichage des prix</h1><p class="lead">Touchez un produit pour l'ajouter. Viande et fruits & légumes partent sur une feuille A4 (HP) ; l'épicerie part sur le rouleau Brother. Le format et le fond s'appliquent à la prochaine étiquette ; chaque étiquette en attente peut changer de fond.</p></div>
     <div class="toolbar"><button class="btn" data-act="preview" ${total ? '' : 'disabled'}>${I.eye} Aperçu</button></div>
@@ -1169,8 +1183,15 @@ Views.prix = function () {
       <div style="height:14px"></div>
       ${list.length ? `<div class="prod-grid">${list.map(productCard).join('')}</div>` : `<div class="card empty"><strong>Aucun produit ici.</strong><span>${prods.length ? 'Changez de rayon ou modifiez la recherche.' : 'Le catalogue est vide.'}</span>${prods.length ? '' : '<button class="btn btn-primary" data-act="seed">Charger les produits de départ</button>'}</div>`}
     </div>
-    <div class="queue-panel">
-      <div class="card">
+    <div class="queue-panel">${queuePanelHTML(ctx)}</div>
+  </div>
+  <div class="mobile-bar ${total ? '' : 'empty'}"><span class="fill"><strong class="num">${total}</strong> en attente · HP ${sheets.length} f. · Brother ${brTotal}</span><button class="btn btn-sm" data-act="clearq" ${total ? '' : 'disabled'}>${I.trash} Vider</button><button class="btn btn-sm" data-act="preview" ${total ? '' : 'disabled'}>${I.eye}</button><button class="btn btn-sm btn-primary" data-act="${canDirectPrint() ? 'printdirect' : 'printpdf'}" ${hpTotal ? '' : 'disabled'}>${I.print} HP</button><button class="btn btn-sm" data-act="${canDirectPrint() ? 'bprintdirect' : 'bprintpdf'}" ${brTotal ? '' : 'disabled'}>${I.print} Brother</button><button class="btn btn-sm btn-ghost" data-act="gotoqueue">File</button></div>`;
+};
+let _lastPrixCtx = null;
+function queuePanelHTML(ctx) {
+  ctx = ctx || _lastPrixCtx; if (!ctx) return '';
+  const { total, hpTotal, brTotal, sheets, hpItems, brItems, brPrev, printHp, printBr, s, qItem } = ctx;
+  return `<div class="card">
         <div class="card-head"><h2>À imprimer</h2><span class="pill ${total ? 'pill-crit' : 'pill-neutral'}">${total} étiquette${total > 1 ? 's' : ''}</span></div>
         <div class="card-pad" style="border-bottom:1px solid var(--line)"><div class="eyebrow">HP · feuilles A4 · ${hpTotal} affiche${hpTotal > 1 ? 's' : ''} · ${sheets.length} feuille${sheets.length > 1 ? 's' : ''}</div></div>
         ${sheets.length ? `<div class="sheet-thumbs">${sheets.slice(0, 2).map((sh, i) => { const F = FORMATS[sh.format]; const land = F.orient === 'landscape'; return scaledSheet(sheetHTML(sh, i), land ? 297 : 210, land ? 210 : 297, land ? 160 : 113); }).join('')}${sheets.length > 2 ? `<div class="muted small" style="align-self:center">+${sheets.length - 2}</div>` : ''}</div>` : ''}
@@ -1182,12 +1203,9 @@ Views.prix = function () {
         <div class="card-pad stack" style="border-top:1px solid var(--line)">${printBr}${canDirectPrint() ? '' : '<p class="help">Le PDF s\'enregistre sur cet appareil. HP : papier A4, échelle 100 %. Brother : papier 62 mm de la bonne longueur, échelle 100 %, jamais A4.</p>'}
           <div class="row"><button class="btn btn-ghost btn-sm fill" data-act="preview" ${total ? '' : 'disabled'}>${I.eye} Aperçu</button><button class="btn btn-ghost btn-sm fill" data-act="clearq" ${total ? '' : 'disabled'}>${I.trash} Tout vider</button></div>
         </div>
-      </div>
-    </div>
-  </div>
-  ${total ? `<div class="mobile-bar"><span class="fill"><strong class="num">${total}</strong> étiquette${total > 1 ? 's' : ''} · HP ${sheets.length} feuille${sheets.length > 1 ? 's' : ''} · Brother ${brTotal}</span><button class="btn btn-sm" data-act="gotoqueue">Voir la file</button></div>` : ''}`;
-};
-Views.prix.after = function () { if (PriceQueue.items.length) $('#view').classList.add('has-bar'); };
+      </div>`;
+}
+Views.prix.after = function () { $('#view').classList.add('has-bar'); };
 function openPreview() {
   const sheets = buildSheets(PriceQueue.hp()); const br = brotherPricePages(PriceQueue.brother());
   if (!sheets.length && !br.pages.length) return;
@@ -1229,13 +1247,89 @@ async function saveProductForm(id) {
   const promos = []; $$('[data-promo-row]', f).forEach(r => { const i = r.dataset.promoRow; const q = num(o['pq' + i]), p = num(o['pp' + i]); if (q && p != null) promos.push({ q, p, k: o['pk' + i] || 'unit' }); });
   promos.sort((a, b) => a.q - b.q);
   const cur = id ? Store.get('produits', id) : {};
-  const hist = (cur && cur.historique) ? cur.historique.slice(-20) : [];
+  const hist = (cur && cur.historique) ? cur.historique.slice(-400) : [];
   const now = new Date().toISOString(); const priceChanged = id && cur && cur.price !== num(o.price);
   const promosChanged = id && cur && JSON.stringify(cur.promos || []) !== JSON.stringify(promos);
   if (priceChanged) hist.push({ t: now, de: cur.price, a: num(o.price) });
   const data = Object.assign({}, cur, { name: o.name.trim(), cat: o.cat, espece: o.cat === 'viande' ? o.espece : '', price: num(o.price), unit: o.unit, origin: o.origin.trim(), code: (o.code || '').trim().toUpperCase(), promos, actif: !!o.actif, detail: { ne: o.d_ne.trim(), eleve: o.d_eleve.trim(), abattu: o.d_abattu.trim(), categorie: o.d_categorie, race: o.d_race }, maj: now, historique: hist }, (priceChanged || promosChanged || !id) ? { majPrix: now } : {});
   const pid = id || ('p-' + uid());
   try { await Store.set('produits', pid, data); closeModal(); toast(id ? 'Produit mis à jour' : 'Produit ajouté', 'ok'); if (priceChanged || promosChanged) await notify({ type: 'prix', produitId: pid, nom: data.name, de: cur.price, a: data.price, offres: promosChanged }); else if (!id) await notify({ type: 'produit', produitId: pid, nom: data.name, a: data.price }); } catch (e) { }
+}
+
+
+/* ===================== évolution des prix ===================== */
+const EvoOpts = { id: '', q: '', period: '6m' };
+function evoSeries(p, period) {
+  const h = (p.historique || []).filter(x => x.t && x.a != null).sort((a, b) => a.t.localeCompare(b.t));
+  const now = new Date(); const days = { '1m': 31, '3m': 92, '6m': 183, '1a': 366, 'tout': 36500 }[period] || 183;
+  const from = new Date(now.getTime() - days * 86400000);
+  const pts = [];
+  const before = h.filter(x => new Date(x.t) < from); const start = before.length ? before[before.length - 1].a : (h.length ? h[0].de : p.price);
+  if (start != null) pts.push({ t: from, v: Number(start), virtual: true });
+  h.filter(x => new Date(x.t) >= from).forEach(x => pts.push({ t: new Date(x.t), v: Number(x.a), de: x.de }));
+  if (p.price != null) pts.push({ t: now, v: Number(p.price), virtual: true });
+  return { pts, changes: h.filter(x => new Date(x.t) >= from).reverse(), from, to: now };
+}
+function evoChartSvg(p, period, W = 720, H = 300) {
+  const { pts, from, to } = evoSeries(p, period);
+  if (pts.length < 2) return `<div class="empty"><span>Pas encore d'historique pour ce produit sur cette période.</span></div>`;
+  const padL = 56, padR = 16, padT = 18, padB = 36; const w = W - padL - padR, h = H - padT - padB;
+  const vals = pts.map(x => x.v); let lo = Math.min(...vals), hi = Math.max(...vals); if (hi === lo) { lo = lo * 0.9; hi = hi * 1.1 || 1; } const m = (hi - lo) * 0.12; lo -= m; hi += m;
+  const X = t => padL + (t - from) / (to - from) * w, Y = v => padT + (hi - v) / (hi - lo) * h;
+  let d = ''; pts.forEach((pt, i) => { const x = X(pt.t), y = Y(pt.v); if (i === 0) d += `M${x.toFixed(1)} ${y.toFixed(1)}`; else { const py = Y(pts[i - 1].v); d += ` L${x.toFixed(1)} ${py.toFixed(1)} L${x.toFixed(1)} ${y.toFixed(1)}`; } });
+  const ticks = 4; let grid = ''; for (let i = 0; i <= ticks; i++) { const v = lo + (hi - lo) * i / ticks; const y = Y(v); grid += `<line x1="${padL}" x2="${W - padR}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#e5e2dc"/><text x="${padL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" font-size="12" fill="#6b6762">${v.toFixed(2).replace('.', ',')} €</text>`; }
+  const span = to - from; const nx = 5; let xl = ''; for (let i = 0; i <= nx; i++) { const t = new Date(from.getTime() + span * i / nx); const x = X(t); xl += `<text x="${x.toFixed(1)}" y="${H - 12}" text-anchor="${i === 0 ? 'start' : i === nx ? 'end' : 'middle'}" font-size="12" fill="#6b6762">${t.toLocaleDateString('fr-FR', span > 200 * 86400000 ? { month: 'short', year: '2-digit' } : { day: '2-digit', month: 'short' })}</text>`; }
+  const dots = pts.filter(x => !x.virtual).map(x => `<circle cx="${X(x.t).toFixed(1)}" cy="${Y(x.v).toFixed(1)}" r="4.5" fill="#163bdc" stroke="#fff" stroke-width="2"><title>${x.t.toLocaleDateString('fr-FR')} : ${fmtMoney(x.de)} → ${fmtMoney(x.v)}</title></circle>`).join('');
+  return `<svg class="evo-chart" viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Évolution du prix">${grid}<path d="${d}" fill="none" stroke="#163bdc" stroke-width="3" stroke-linejoin="round"/>${dots}${xl}</svg>`;
+}
+Views.evolution = function () {
+  const prods = Store.all('produits').filter(p => p.actif !== false).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  const nq = normStr(EvoOpts.q); const list = nq ? prods.filter(p => normStr(p.name).includes(nq)) : prods;
+  const p = Store.get('produits', EvoOpts.id) || null;
+  const periods = [['1m', '1 mois'], ['3m', '3 mois'], ['6m', '6 mois'], ['1a', '1 an'], ['tout', 'Tout']];
+  const recent = prods.filter(x => (x.historique || []).length).map(x => ({ p: x, last: x.historique[x.historique.length - 1] })).sort((a, b) => (b.last.t || '').localeCompare(a.last.t || '')).slice(0, 8);
+  let detail = '';
+  if (p) {
+    const { changes, pts } = evoSeries(p, EvoOpts.period);
+    const first = pts.length ? pts[0].v : null, last = p.price; const delta = first != null && last != null ? last - first : null;
+    detail = `<div class="card card-pad stack">
+      <div class="spread"><div><div class="eyebrow">${esc(CAT_LABEL[p.cat] || '')} · ${esc(UNIT_LABEL[p.unit] || '')}</div><h2 style="margin:0">${esc(p.name)}</h2></div><div class="row"><button class="btn btn-sm" data-act="evocsv">${I.download} Exporter CSV</button><button class="btn btn-sm btn-primary" data-act="evoprint">${I.print} Imprimer</button></div></div>
+      <div class="chips">${periods.map(([k, l]) => `<button class="chip ${EvoOpts.period === k ? 'on' : ''}" data-act="evoperiod" data-v="${k}">${l}</button>`).join('')}</div>
+      <div class="stats" style="margin:0"><div class="stat"><span class="v num">${fmtMoney(p.price)}</span><span class="k">prix actuel</span></div><div class="stat"><span class="v num">${delta == null ? '—' : (delta >= 0 ? '+' : '−') + fmtMoney(Math.abs(delta))}</span><span class="k">variation sur la période</span></div><div class="stat"><span class="v num">${changes.length}</span><span class="k">changement${changes.length > 1 ? 's' : ''}</span></div></div>
+      ${evoChartSvg(p, EvoOpts.period)}
+      ${changes.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th class="right">Avant</th><th class="right">Après</th><th class="right">Écart</th></tr></thead><tbody>${changes.map(c => `<tr><td>${esc(fmtDateTime(c.t))}</td><td class="right num">${fmtMoney(c.de)}</td><td class="right num"><strong>${fmtMoney(c.a)}</strong></td><td class="right num" style="color:${(c.a - c.de) >= 0 ? '#b42318' : '#067647'}">${(c.a - c.de) >= 0 ? '+' : '−'}${fmtMoney(Math.abs(c.a - c.de))}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    </div>`;
+  }
+  return `
+  <div class="page-head"><div><div class="eyebrow">Historique</div><h1>Évolution des prix</h1><p class="lead">Choisissez un produit : courbe de son prix dans le temps, liste des changements, export et impression.</p></div></div>
+  <div class="grid-2" style="grid-template-columns:minmax(0,1fr)">
+    <div class="stack">
+      <div class="card card-pad stack">
+        <div class="search">${I.search}<input class="input input-lg" id="evo-search" placeholder="Rechercher un produit…" value="${esc(EvoOpts.q)}" data-on="evosearch" autocomplete="off"></div>
+        ${!p && recent.length ? `<div class="eyebrow">Derniers prix modifiés</div><div class="chips">${recent.map(r => `<button class="chip" data-act="evoprod" data-id="${r.p.id}">${esc(r.p.name)} · ${fmtMoney(r.last.a)}</button>`).join('')}</div>` : ''}
+        <div class="chips">${list.slice(0, nq ? 60 : 40).map(x => `<button class="chip ${x.id === EvoOpts.id ? 'on' : ''}" data-act="evoprod" data-id="${x.id}">${esc(x.name)}</button>`).join('')}${list.length > (nq ? 60 : 40) ? `<span class="muted small">… tapez le nom pour affiner</span>` : ''}</div>
+      </div>
+      ${detail || `<div class="card empty"><strong>Sélectionnez un produit.</strong><span>Chaque changement de prix fait depuis Prix BHVA ou le comptoir est enregistré automatiquement.</span></div>`}
+    </div>
+  </div>`;
+};
+async function evoExportCsv() {
+  const p = Store.get('produits', EvoOpts.id); if (!p) return;
+  const { changes } = evoSeries(p, EvoOpts.period);
+  const rows = [['Produit', 'Date', 'Avant', 'Après', 'Écart']].concat(changes.slice().reverse().map(c => [p.name, fmtDateTime(c.t), String(c.de ?? '').replace('.', ','), String(c.a).replace('.', ','), String((c.a - (c.de || 0)).toFixed(2)).replace('.', ',')]));
+  await deliverText('﻿' + rows.map(r => r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(';')).join('\n'), `evolution-${normStr(p.name).replace(/[^a-z0-9]+/g, '-')}-${todayStr()}.csv`);
+}
+async function evoPrint() {
+  const p = Store.get('produits', EvoOpts.id); if (!p) return;
+  const { changes, pts } = evoSeries(p, EvoOpts.period); const s = Store.settings();
+  const per = { '1m': '1 mois', '3m': '3 mois', '6m': '6 mois', '1a': '1 an', 'tout': 'depuis le début' }[EvoOpts.period];
+  const html = `<div class="sheet evo-sheet" style="width:210mm;height:297mm;padding:14mm;box-sizing:border-box;display:block;font-family:Archivo,Arial,sans-serif;color:#111">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #111;padding-bottom:4mm;margin-bottom:6mm"><div><div style="font-size:9pt;letter-spacing:.1em;text-transform:uppercase;color:#555">${esc(s.nom || 'BHVA')} · évolution des prix · ${per}</div><div style="font-size:22pt;font-weight:800">${esc(p.name)}</div></div><div style="text-align:right;font-size:10pt;color:#555">Imprimé le ${esc(fmtDate(todayStr(), 'long'))}<br>Prix actuel : <strong style="color:#111;font-size:14pt">${fmtMoney(p.price)}${esc(UNIT_LABEL[p.unit] || '')}</strong></div></div>
+    ${evoChartSvg(p, EvoOpts.period, 720, 320).replace('width="100%"', 'width="182mm" height="81mm"')}
+    <table style="width:100%;border-collapse:collapse;margin-top:6mm;font-size:10.5pt"><thead><tr style="border-bottom:1px solid #111"><th style="text-align:left;padding:2mm 1mm">Date</th><th style="text-align:right;padding:2mm 1mm">Avant</th><th style="text-align:right;padding:2mm 1mm">Après</th><th style="text-align:right;padding:2mm 1mm">Écart</th></tr></thead><tbody>${changes.slice(0, 40).map(c => `<tr style="border-bottom:1px solid #ddd"><td style="padding:1.6mm 1mm">${esc(fmtDateTime(c.t))}</td><td style="text-align:right;padding:1.6mm 1mm">${fmtMoney(c.de)}</td><td style="text-align:right;padding:1.6mm 1mm;font-weight:700">${fmtMoney(c.a)}</td><td style="text-align:right;padding:1.6mm 1mm">${(c.a - c.de) >= 0 ? '+' : '−'}${fmtMoney(Math.abs(c.a - c.de))}</td></tr>`).join('') || '<tr><td colspan="4" style="padding:4mm;color:#777">Aucun changement sur la période.</td></tr>'}</tbody></table>
+  </div>`;
+  const pages = [{ html, w: 210, h: 297 }];
+  try { if (canDirectPrint()) await directPrint(pages, null, `evolution-${todayStr()}.pdf`); else { const blob = await pagesToPdf(pages, { scale: 2.2 }); await deliverPdf(blob, `evolution-${todayStr()}.pdf`); } } catch (e) { toast('Échec : ' + e.message, 'err', 6000); }
 }
 
 /* ===================== application à part : PRIX BHVA GESTION (#gestion) ===================== */
@@ -1252,6 +1346,7 @@ Views.gestion = function () {
     <div class="search">${I.search}<input class="input input-lg" id="prod-search" placeholder="Rechercher un produit…" value="${esc(ProdOpts.q)}" data-on="psearch" autocomplete="off"></div>
     <div class="chips">${cats.map(c => `<button class="chip ${cat === c ? 'on' : ''}" data-act="pcat" data-v="${c}">${CAT_LABEL[c]}</button>`).join('')}<button class="chip ${cat === 'tous' ? 'on' : ''}" data-act="pcat" data-v="tous">Tous</button></div>
   </div>
+  <button class="fab-top" data-act="scrolltop" aria-label="Haut de page">${I.back}</button>
   <p class="help" style="margin:8px 0 10px">Tapez le nouveau prix dans la case (ex. 28,80) : il est enregistré dès que vous quittez la case, et le comptoir reçoit l'alerte. Crayon : nom, unité, origine, offres (dès 2 kg… ou lot).</p>
   <div class="card">${!prods.length ? `<div class="empty"><strong>Le catalogue est vide.</strong><button class="btn btn-primary" data-act="seed">Charger les 246 produits de départ</button></div>` : ''}${list.length ? list.map(p => `<div class="gest-row"><div><div class="n">${esc(p.name)}${p.actif === false ? ' <span class="pill pill-neutral">masqué</span>' : ''}</div><div class="s">${esc(p.cat === 'viande' ? (ESPECE_TAG[p.espece] || 'Viande') : CAT_LABEL[p.cat] || '')} · ${esc(UNIT_LABEL[p.unit] || p.unit)}${productLabelOrigin(p).lines[0] ? ' · ' + esc(productLabelOrigin(p).lines[0]) : ''}${(p.promos || []).length ? ' · ' + (p.promos || []).map(pr => esc(promoText(p, pr))).join(' · ') : ''}</div></div><input class="input num" type="text" inputmode="decimal" enterkeyhint="done" value="${p.price == null ? '' : p.price.toFixed(2).replace('.', ',')}" data-on="price" data-commit="change" data-id="${p.id}" id="price-${p.id}" aria-label="Prix de ${esc(p.name)}"><button class="icon-btn" data-act="editp" data-id="${p.id}" aria-label="Modifier">${I.pencil}</button></div>`).join('') : `<div class="empty"><strong>Aucun produit.</strong></div>`}</div>
   ${window.FORCE_GESTION ? `<p class="help" style="margin-top:12px">${Store.mode === 'local' ? 'PAS SYNCHRONISÉ : les prix restent sur ce téléphone. Vérifiez la connexion internet puis touchez la pastille rouge en haut.' : 'Synchronisé : chaque changement part immédiatement au comptoir et en notification.'}</p><div class="row" style="margin-top:8px"><button class="btn btn-sm" data-act="pushtest">Envoyer une notification de test à l'iPad</button></div>` : `<div class="card card-pad stack" style="margin-top:14px"><h3>Installer sur ce téléphone</h3>
@@ -1816,7 +1911,7 @@ const Actions = {
   pcat: el => { ProdOpts.cat = el.dataset.v; render(); },
   qplus: el => { const it = PriceQueue.items.find(x => x.id === el.dataset.id); if (it) PriceQueue.setCopies(it.id, it.copies + 1); render(); },
   qminus: el => { const it = PriceQueue.items.find(x => x.id === el.dataset.id); if (it) PriceQueue.setCopies(it.id, it.copies - 1); render(); },
-  clearq: async () => { if (await confirmDialog('Vider toutes les étiquettes en attente (HP et Brother) ?', { ok: 'Vider' })) { PriceQueue.clear(); render(); } },
+  clearq: async () => { if (await confirmDialog('Vider toutes les étiquettes en attente (HP et Brother) ?', { ok: 'Vider' })) { PriceQueue.clear(); closeModal(); render(); } },
   preview: () => openPreview(),
   notifs: () => openNotifs(),
   copylink: async el => { const url = location.href.split('#')[0].replace(/[^/]*$/, '') + 'prix.html'; try { await navigator.clipboard.writeText(url); toast('Lien copié : ' + url, 'ok', 5000); } catch (e) { openModal({ title: 'Lien de l\'application prix', narrow: true, body: `<p>Copiez ce lien et ouvrez-le sur le téléphone :</p><input class="input" value="${esc(url)}" readonly onfocus="this.select()">`, footer: '<button class="btn" data-close="1">Fermer</button>' }); } },
@@ -1829,7 +1924,12 @@ const Actions = {
   dlcmode: el => { DlcOpts.mode = el.dataset.v; render(); },
   dlcmonth: el => { DlcOpts.month = el.dataset.v; DlcOpts.sel = null; render(); },
   dlcday: el => { DlcOpts.sel = el.dataset.v || null; render(); },
-  gotoqueue: () => { const q = $('.queue-panel'); if (q) q.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
+  gotoqueue: () => { if (window.innerWidth >= 900) { const q = $('.queue-panel'); if (q) q.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; } openModal({ title: 'À imprimer', body: queuePanelHTML(), footer: `<button class="btn" data-close="1">Fermer</button>` }); },
+  evoprod: el => { EvoOpts.id = el.dataset.id; location.hash = '#evolution'; render(); },
+  evoperiod: el => { EvoOpts.period = el.dataset.v; render(); },
+  evocsv: () => evoExportCsv(),
+  evoprint: () => evoPrint(),
+  scrolltop: () => window.scrollTo({ top: 0, behavior: 'smooth' }),
   printpdf: el => printPriceSheets('pdf', el),
   printdirect: el => printPriceSheets('direct', el),
   saveproduct: el => saveProductForm(el.dataset.id || null),
@@ -1916,7 +2016,8 @@ const Inputs = {
   guides: el => { PriceOpts.guides = el.checked; LS.set('guides', el.checked); render(); },
   marge: el => { PriceOpts.marge = el.checked; LS.set('marge', el.checked); render(); },
   setson: async el => { if (!el.checked) return; const prev = Store.settings(); await Store.set('reglages', 'boucherie', Object.assign({}, prev, { sonAlerte: el.value })); Alarm.preview(el.value); },
-  price: async el => { const v = num(el.value); const p = Store.get('produits', el.dataset.id); if (!p) return; if (v == null || v < 0) { el.value = p.price == null ? '' : p.price.toFixed(2).replace('.', ','); toast('Prix non valide — l\'ancien prix est conservé', 'err'); return; } el.value = v.toFixed(2).replace('.', ','); if (p.price === v) return; const now = new Date().toISOString(); const hist = (p.historique || []).slice(-20).concat([{ t: now, de: p.price, a: v }]); await Store.patch('produits', el.dataset.id, { price: v, maj: now, majPrix: now, historique: hist }); toast(`${p.name} : ${fmtMoney(v)}${UNIT_LABEL[p.unit] || ''} enregistré`, 'ok', 1800); await notify({ type: 'prix', produitId: p.id, nom: p.name, de: p.price, a: v }); },
+  evosearch: el => { EvoOpts.q = el.value; render(); },
+  price: async el => { const v = num(el.value); const p = Store.get('produits', el.dataset.id); if (!p) return; if (v == null || v < 0) { el.value = p.price == null ? '' : p.price.toFixed(2).replace('.', ','); toast('Prix non valide — l\'ancien prix est conservé', 'err'); return; } el.value = v.toFixed(2).replace('.', ','); if (p.price === v) return; const now = new Date().toISOString(); const hist = (p.historique || []).slice(-400).concat([{ t: now, de: p.price, a: v }]); await Store.patch('produits', el.dataset.id, { price: v, maj: now, majPrix: now, historique: hist }); toast(`${p.name} : ${fmtMoney(v)}${UNIT_LABEL[p.unit] || ''} enregistré`, 'ok', 1800); await notify({ type: 'prix', produitId: p.id, nom: p.name, de: p.price, a: v }); },
   stmin: async el => { const v = num(el.value); const p = Store.get('produits', el.dataset.id); const s = Store.get('stock', el.dataset.id) || { qte: null, unite: p && p.unit === 'kg' ? 'kg' : 'piece' }; if (s.min === v) return; await Store.set('stock', el.dataset.id, Object.assign({}, s, { min: v, nom: p ? p.name : '' })); },
   recespece: el => { const box = $('#orig-fields'); if (box) box.innerHTML = originFields(el.value, { ne: 'France', eleve: 'France', abattu: 'France' }); },
   fabrecette: el => { const f = $('#fab-form'); if (f) f.dataset.auto = '1'; applyRecetteToForm(el.value); },
