@@ -1,0 +1,24 @@
+{
+ "name": "Liste MIN DE LOMME",
+ "short_name": "MIN Lomme",
+ "start_url": "./index.html",
+ "scope": "./",
+ "display": "standalone",
+ "orientation": "any",
+ "background_color": "#f6f4ee",
+ "theme_color": "#2f7a3d",
+ "lang": "fr",
+ "icons": [
+  {
+   "src": "../icons/marche-180.png",
+   "sizes": "180x180",
+   "type": "image/png"
+  },
+  {
+   "src": "../icons/marche-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "any"
+  }
+ ]
+}
