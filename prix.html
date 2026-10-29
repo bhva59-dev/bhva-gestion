@@ -492,6 +492,7 @@ details.adv summary{cursor:pointer;font-weight:600;color:var(--fg-2);padding:6px
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>const FIREBASE_CONFIG={apiKey:"AIzaSyAuEx9IUK0JdWXJeLgFj86IB0-KCdwaf4U",authDomain:"bhva-gestion.firebaseapp.com",projectId:"bhva-gestion",storageBucket:"bhva-gestion.firebasestorage.app",messagingSenderId:"544721878098",appId:"1:544721878098:web:c3161a8b827f2f1bb7338b"};const FIREBASE_LOGIN="boucherie@bhva-gestion.app";</script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
@@ -569,9 +570,9 @@ const Store = {
     COLLS.forEach(c => { this.cache[c] = new Map(); });
     let db = null;
     try { if (window.claude && typeof window.claude.use === 'function') db = await window.claude.use('db'); } catch (e) { db = null; }
-    const fbCfg = LS.get('firebase', null);
-    if (!db && fbCfg && window.firebase) {
-      try { await this.initFirebase(fbCfg); this.ready = true; return; } catch (e) { console.error('firebase', e); toast('Synchronisation impossible : ' + (e.message || e), 'err', 8000); }
+    const fbCfg = (typeof FIREBASE_CONFIG !== 'undefined' && FIREBASE_CONFIG) || LS.get('firebase', null);
+    if (!db && fbCfg && window.firebase && !LS.get('fbSkip', false)) {
+      try { await this.initFirebase(fbCfg); this.ready = true; return; } catch (e) { console.error('firebase', e); if (e && e.code === 'auth/cancelled') { /* pas de mot de passe : mode local */ } else toast('Synchronisation impossible : ' + (e.message || e), 'err', 8000); }
     }
     if (db) {
       this.mode = 'db'; this.db = db;
@@ -599,7 +600,14 @@ const Store = {
   },
   async initFirebase(cfg) {
     if (!firebase.apps.length) firebase.initializeApp(cfg);
-    try { if (firebase.auth) { const a = firebase.auth(); if (!a.currentUser) await a.signInAnonymously(); } } catch (e) { console.warn('auth anonyme indisponible', e && e.code); }
+    const a = firebase.auth(); await a.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+    await new Promise(res => { const un = a.onAuthStateChanged(() => { un(); res(); }); });
+    if (!a.currentUser) {
+      const pwd = await askShopPassword();
+      if (!pwd) { LS.set('fbSkip', true); const err = new Error('cancelled'); err.code = 'auth/cancelled'; throw err; }
+      try { await a.signInWithEmailAndPassword(FIREBASE_LOGIN, pwd); }
+      catch (e) { LS.del('shopPwdOk'); const msg = (e && (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials')) ? 'Mot de passe incorrect' : 'Connexion impossible : ' + (e && e.code || 'erreur'); toast(msg, 'err', 6000); return this.initFirebase(cfg); }
+    }
     const fs = firebase.firestore(); try { fs.settings({ ignoreUndefinedProperties: true, merge: true }); } catch (e) { }
     try { await fs.enablePersistence({ synchronizeTabs: true }); } catch (e) { }
     this.fb = fs; this.mode = 'firebase';
@@ -790,6 +798,14 @@ function confirmDialog(msg, { danger = false, ok = 'Confirmer', title = 'Confirm
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && _modal) closeModal(); });
 
+function askShopPassword() {
+  return new Promise(res => {
+    openModal({ title: 'BHVA · connexion de cet appareil', narrow: true, body: `<p>Entrez le mot de passe de la boucherie pour relier cet appareil à la base partagée (une seule fois).</p><input class="input input-lg" id="shop-pwd" type="password" placeholder="Mot de passe" autocomplete="current-password">`, footer: `<button class="btn" id="shop-pwd-skip">Travailler sans synchronisation</button><button class="btn btn-primary" id="shop-pwd-ok">Connecter</button>`, onClose: () => res(null) });
+    const ok = () => { const v = ($('#shop-pwd') || {}).value || ''; if (!v) return; _modal.onClose = null; closeModal(); res(v); };
+    $('#shop-pwd-ok').addEventListener('click', ok); $('#shop-pwd').addEventListener('keydown', e => { if (e.key === 'Enter') ok(); });
+    $('#shop-pwd-skip').addEventListener('click', () => { _modal.onClose = null; closeModal(); res(null); });
+  });
+}
 /* form helpers */
 function formData(form) { const o = {}; new FormData(form).forEach((v, k) => { o[k] = v; }); $$('input[type=checkbox]', form).forEach(c => { o[c.name] = c.checked; }); return o; }
 function sel(name, options, value, attrs = '') { return `<select class="input" name="${name}" id="f-${name}" ${attrs}>${options.map(o => `<option value="${esc(o[0])}" ${String(o[0]) === String(value ?? '') ? 'selected' : ''}>${esc(o[1])}</option>`).join('')}</select>`; }
@@ -1683,7 +1699,7 @@ Views.reglages = function () {
   <div class="stack">
     <div class="card card-pad stack"><h2>Synchronisation entre appareils</h2>
       <p class="help">${Store.mode === 'firebase' ? '<span class="pill pill-ok">Connecté</span> Base partagée Firebase : iPad, téléphone et PC voient les mêmes données.' : Store.mode === 'db' ? 'Base partagée claude.ai.' : 'Pour l\'instant, les données restent sur cet appareil. Collez ici la configuration Firebase (donnée par Claude lors de la mise en place) pour partager les données entre l\'iPad, le téléphone et le PC.'}</p>
-      ${Store.mode === 'firebase' ? `<button class="btn btn-danger btn-sm" data-act="fbdisconnect">Déconnecter cet appareil de la base</button>` : `<textarea class="input" id="fb-config" rows="4" placeholder='{"apiKey": "...", "authDomain": "...", "projectId": "...", "appId": "..."}'></textarea><button class="btn btn-primary" data-act="fbconnect">Connecter la synchronisation</button>`}
+      ${Store.mode === 'firebase' ? `<button class="btn btn-danger btn-sm" data-act="fbdisconnect">Déconnecter cet appareil de la base</button>` : (typeof FIREBASE_CONFIG !== 'undefined' && FIREBASE_CONFIG) ? `<button class="btn btn-primary" data-act="fbreconnect">Connecter cet appareil (mot de passe de la boucherie)</button>` : `<textarea class="input" id="fb-config" rows="4" placeholder='{"apiKey": "...", "authDomain": "...", "projectId": "...", "appId": "..."}'></textarea><button class="btn btn-primary" data-act="fbconnect">Connecter la synchronisation</button>`}
       <div class="form-grid" style="margin-top:6px">${fld('Code d\'accès à Prix BHVA (téléphone)', inp('codePrix', s.codePrix || '5624', 'inputmode="numeric" form="reg-form"'))}</div>
     </div>
     <div class="card card-pad stack"><h2>Données</h2><div class="kv"><dt>Enregistrement</dt><dd>${Store.mode === 'db' ? 'Base partagée du site (tous vos appareils)' : 'Cet appareil uniquement'}</dd><dt>Produits</dt><dd class="num">${Store.count('produits')}</dd><dt>Réceptions / lots</dt><dd class="num">${Store.count('receptions')} / ${Store.count('fabrications')}</dd><dt>Commandes</dt><dd class="num">${Store.count('commandes')}</dd></div>
@@ -1803,7 +1819,8 @@ const Actions = {
   backup: () => backupAll(),
   restore: () => { $('#file-import').value = ''; $('#file-import').click(); },
   fbconnect: () => { const t = ($('#fb-config') || {}).value || ''; const m = t.match(/\{[\s\S]*\}/); if (!m) { toast('Collez la configuration complète, entre accolades.', 'err'); return; } let cfg; try { cfg = JSON.parse(m[0].replace(/(\w+)\s*:/g, '"$1":').replace(/'/g, '"').replace(/,\s*}/g, '}')); } catch (e) { toast('Configuration illisible : ' + e.message, 'err', 6000); return; } if (!cfg.projectId || !cfg.apiKey) { toast('Il manque projectId ou apiKey.', 'err'); return; } LS.set('firebase', cfg); toast('Configuration enregistrée, rechargement…', 'ok'); setTimeout(() => location.reload(), 800); },
-  fbdisconnect: async () => { if (await confirmDialog('Déconnecter cet appareil de la base partagée ? Les données resteront dans la base, cet appareil repassera en mode local.', { danger: true, ok: 'Déconnecter' })) { LS.del('firebase'); location.reload(); } },
+  fbdisconnect: async () => { if (await confirmDialog('Déconnecter cet appareil de la base partagée ? Les données resteront dans la base, cet appareil repassera en mode local.', { danger: true, ok: 'Déconnecter' })) { try { if (window.firebase && firebase.apps.length) await firebase.auth().signOut(); } catch (e) { } LS.del('firebase'); LS.set('fbSkip', true); location.reload(); } },
+  fbreconnect: () => { LS.del('fbSkip'); location.reload(); },
   pinprompt: () => { if (!$('#pin-input')) { const ev = new Event('x'); openModal({ title: 'Prix BHVA', narrow: true, body: `<p>Entrez le code d'accès pour modifier les prix.</p><input class="input input-lg" id="pin-input" inputmode="numeric" type="password" placeholder="Code" autocomplete="off">`, footer: `<button class="btn btn-primary" data-act="pinok">Entrer</button>`, onClose: () => { if (String(LS.get('pinok', '')) !== String(Store.settings().codePrix || '5624')) setTimeout(() => Actions.pinprompt(), 50); } }); $('#pin-input').addEventListener('keydown', e => { if (e.key === 'Enter') Actions.pinok(); }); } },
   pinok: () => { const v = ($('#pin-input') || {}).value || ''; if (v.trim() === String(Store.settings().codePrix || '5624')) { LS.set('pinok', v.trim()); closeModal(); render(); } else toast('Code incorrect', 'err'); },
   wipe: () => wipeAll()
