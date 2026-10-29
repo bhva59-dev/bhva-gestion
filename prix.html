@@ -693,7 +693,7 @@ const Store = {
   onChange(fn) { this._subs.add(fn); return () => this._subs.delete(fn); },
   notify(c) { (this._dirty || (this._dirty = new Set())).add(c); if (this._raf) return; this._raf = requestAnimationFrame(() => { this._raf = 0; const list = Array.from(this._dirty); this._dirty.clear(); this._subs.forEach(fn => { for (const x of list) { try { fn(x); } catch (e) { console.error(e); } } }); }); },
   settings() {
-    const d = { nom: 'Boucherie El Fen', societe: 'SAS BHVA', adresse: '24 place de Verdun, 59650 Villeneuve-d\'Ascq', tel: '09 80 99 33 39', siret: '', agrement: '', brotherW: 62, brotherH: 100, brotherPrixH: 40, brotherOrient: 'portrait', ntfyTopic: '', fondDefaut: 'habituel', formatDefaut: 'A6', nomSurEtiquette: false, guides: true, veille: 4, logo: '', initiales: 'BHVA' };
+    const d = { nom: 'Boucherie El Fen', societe: 'SAS BHVA', adresse: '24 place de Verdun, 59650 Villeneuve-d\'Ascq', tel: '09 80 99 33 39', siret: '', agrement: '', brotherW: 62, brotherH: 100, brotherPrixH: 40, brotherOrient: 'portrait', ntfyTopic: '', sonAlerte: 'carillon', fondDefaut: 'habituel', formatDefaut: 'A6', nomSurEtiquette: false, guides: true, veille: 4, logo: '', initiales: 'BHVA' };
     return Object.assign(d, this.get('reglages', 'boucherie') || {});
   },
   exportAll() { const o = { exportedAt: new Date().toISOString(), app: 'comptoir-boucherie', data: {} }; COLLS.forEach(c => { o.data[c] = {}; this.cache[c].forEach((v, k) => { const d = Object.assign({}, v); delete d.id; o.data[c][k] = d; }); }); return o; },
@@ -1779,6 +1779,7 @@ Views.reglages = function () {
       <p class="help"><strong>Sur les téléphones / iPad verrouillés</strong> : installez l'application gratuite <strong>ntfy</strong> (App Store / Play Store), ouvrez-la, « + » puis abonnez-vous au sujet ci-dessous. Chaque changement de prix arrive alors comme une vraie notification (son, écran verrouillé, réglable dans Réglages iOS → Notifications → ntfy).</p>
       <div class="form-grid">${fld('Sujet ntfy (identique sur tous les appareils)', inp('ntfyTopic', pushTopic(), 'form="reg-form" autocapitalize="off" autocorrect="off" spellcheck="false"'))}</div>
       <p class="help"><strong>Notifications iOS de l'application elle-même</strong> : ${Notif.state() === 'granted' ? '<span class="pill pill-ok">activées sur cet appareil</span>' : Notif.state() === 'denied' ? '<span class="pill pill-warn">refusées</span> — autorisez-les dans Réglages iOS → Notifications → BHVA' : 'pas encore demandées sur cet appareil'}. ${Notif.standalone() ? '' : 'Sur iPad, il faut d\'abord ouvrir l\'application depuis son icône sur l\'écran d\'accueil.'}</p>
+      <div class="stack" style="gap:6px"><strong>Son de l'alerte au comptoir</strong>${SONS.map(([k, nom, desc]) => `<label class="check" style="justify-content:space-between;gap:10px"><span><input type="radio" name="sonAlerte" value="${k}" form="reg-form" data-on="setson" ${currentSon() === k ? 'checked' : ''}> <strong>${nom}</strong> <span class="muted">· ${desc}</span></span><button type="button" class="btn btn-sm" data-act="sonplay" data-v="${k}">▶ Écouter</button></label>`).join('')}</div>
       <div class="row"><button class="btn btn-primary" data-act="notifask">${I.bell} Activer les notifications sur cet appareil</button><button class="btn" data-act="pushtest">Test notification ntfy</button><button class="btn" data-act="alarmtest">Tester l'alerte sonore</button></div>
     </div>
     <div class="card card-pad stack"><h2>Données</h2><div class="kv"><dt>Enregistrement</dt><dd>${Store.mode === 'db' ? 'Base partagée du site (tous vos appareils)' : 'Cet appareil uniquement'}</dd><dt>Produits</dt><dd class="num">${Store.count('produits')}</dd><dt>Réceptions / lots</dt><dd class="num">${Store.count('receptions')} / ${Store.count('fabrications')}</dd><dt>Commandes</dt><dd class="num">${Store.count('commandes')}</dd></div>
@@ -1795,7 +1796,7 @@ async function saveSettingsForm() {
   const f = $('#reg-form'); if (!f.reportValidity()) return; const o = formData(f);
   const preset = o.brotherPreset; const h = preset === '62x100' ? 100 : preset === '62x29' ? 29 : (num(o.brotherH) || 100);
   const prev = Store.settings();
-  try { await Store.set('reglages', 'boucherie', Object.assign({}, prev, { nom: o.nom.trim(), societe: (o.societe || '').trim(), initiales: (o.initiales || 'BHVA').trim().toUpperCase().slice(0, 4) || 'BHVA', tel: o.tel.trim(), adresse: o.adresse.trim(), siret: o.siret.trim(), agrement: o.agrement.trim(), veille: num(o.veille) ?? 4, formatDefaut: o.formatDefaut, fondDefaut: o.fondDefaut, nomSurEtiquette: !!o.nomSurEtiquette, brotherW: 62, brotherH: h, brotherPrixH: num(o.brotherPrixH) || 40, brotherOrient: o.brotherOrient, ntfyTopic: (o.ntfyTopic || '').trim() })); toast('Réglages enregistrés', 'ok'); Standby.arm(); } catch (e) { }
+  try { await Store.set('reglages', 'boucherie', Object.assign({}, prev, { nom: o.nom.trim(), societe: (o.societe || '').trim(), initiales: (o.initiales || 'BHVA').trim().toUpperCase().slice(0, 4) || 'BHVA', tel: o.tel.trim(), adresse: o.adresse.trim(), siret: o.siret.trim(), agrement: o.agrement.trim(), veille: num(o.veille) ?? 4, formatDefaut: o.formatDefaut, fondDefaut: o.fondDefaut, nomSurEtiquette: !!o.nomSurEtiquette, brotherW: 62, brotherH: h, brotherPrixH: num(o.brotherPrixH) || 40, brotherOrient: o.brotherOrient, ntfyTopic: (o.ntfyTopic || '').trim(), sonAlerte: o.sonAlerte || prev.sonAlerte || 'carillon' })); toast('Réglages enregistrés', 'ok'); Standby.arm(); } catch (e) { }
 }
 async function backupAll() { const o = Store.exportAll(); await deliverText(JSON.stringify(o, null, 1), `sauvegarde-boucherie-${todayStr()}.json`); }
 async function wipeAll() {
@@ -1901,6 +1902,7 @@ const Actions = {
   fbdisconnect: async () => { if (await confirmDialog('Déconnecter cet appareil de la base partagée ? Les données resteront dans la base, cet appareil repassera en mode local.', { danger: true, ok: 'Déconnecter' })) { try { if (window.firebase && firebase.apps.length) await firebase.auth().signOut(); } catch (e) { } LS.del('firebase'); LS.set('fbSkip', true); location.reload(); } },
   fbreconnect: () => { LS.del('fbSkip'); location.reload(); },
   iosshare: () => iosShare(),
+  sonplay: el => Alarm.preview(el.dataset.v),
   notifask: () => Notif.ask(),
   pushtest: async () => { const ok = await sendPush('Test BHVA', 'Les notifications fonctionnent ✔︎'); toast(ok ? 'Notification envoyée — regardez l\'appli ntfy' : 'Envoi impossible (connexion internet ?)', ok ? 'ok' : 'err', 5000); },
   alarmtest: () => Alarm.start({ type: 'prix', nom: 'Test', de: 1, a: 2, t: new Date().toISOString() }, true),
@@ -1914,6 +1916,7 @@ const Inputs = {
   promos: el => { PriceOpts.promos = el.checked; LS.set('promos', el.checked); render(); },
   guides: el => { PriceOpts.guides = el.checked; LS.set('guides', el.checked); render(); },
   marge: el => { PriceOpts.marge = el.checked; LS.set('marge', el.checked); render(); },
+  setson: async el => { if (!el.checked) return; const prev = Store.settings(); await Store.set('reglages', 'boucherie', Object.assign({}, prev, { sonAlerte: el.value })); Alarm.preview(el.value); },
   price: async el => { const v = num(el.value); const p = Store.get('produits', el.dataset.id); if (!p) return; if (v == null || v < 0) { el.value = p.price == null ? '' : p.price.toFixed(2).replace('.', ','); toast('Prix non valide — l\'ancien prix est conservé', 'err'); return; } el.value = v.toFixed(2).replace('.', ','); if (p.price === v) return; const now = new Date().toISOString(); const hist = (p.historique || []).slice(-20).concat([{ t: now, de: p.price, a: v }]); await Store.patch('produits', el.dataset.id, { price: v, maj: now, majPrix: now, historique: hist }); toast(`${p.name} : ${fmtMoney(v)}${UNIT_LABEL[p.unit] || ''} enregistré`, 'ok', 1800); await notify({ type: 'prix', produitId: p.id, nom: p.name, de: p.price, a: v }); },
   stmin: async el => { const v = num(el.value); const p = Store.get('produits', el.dataset.id); const s = Store.get('stock', el.dataset.id) || { qte: null, unite: p && p.unit === 'kg' ? 'kg' : 'piece' }; if (s.min === v) return; await Store.set('stock', el.dataset.id, Object.assign({}, s, { min: v, nom: p ? p.name : '' })); },
   recespece: el => { const box = $('#orig-fields'); if (box) box.innerHTML = originFields(el.value, { ne: 'France', eleve: 'France', abattu: 'France' }); },
@@ -1932,7 +1935,7 @@ document.addEventListener('click', e => {
   try { const r = fn(el, e); if (r && r.catch) r.catch(err => { console.error(err); }); } catch (err) { console.error(err); toast('Erreur : ' + err.message, 'err'); }
 });
 let _inputTimer = 0;
-const commitOnChange = el => el.type === 'checkbox' || el.tagName === 'SELECT' || el.type === 'number' || el.dataset.commit === 'change';
+const commitOnChange = el => el.type === 'checkbox' || el.type === 'radio' || el.tagName === 'SELECT' || el.type === 'number' || el.dataset.commit === 'change';
 document.addEventListener('input', e => {
   const el = e.target.closest('[data-on]'); if (!el) return; const fn = Inputs[el.dataset.on]; if (!fn) return;
   if (commitOnChange(el)) return;
@@ -1963,20 +1966,6 @@ Store.onChange(c => { if (c !== 'notifications') return; const ids = new Set(Sto
 /* ===================== écran d'attente ===================== */
 /* ===================== ALERTE SONORE PERSISTANTE (comptoir) ===================== */
 /* son d'alarme : fichier WAV fabriqué en mémoire, joué par un lecteur <audio> en boucle (sur iPad, un lecteur audio sonne même avec l'interrupteur silencieux, contrairement aux bips Web Audio) */
-function makeAlarmWav() {
-  const sr = 22050, dur = 2.0, n = Math.floor(sr * dur), data = new Int16Array(n);
-  const beeps = [[0.00, 0.22, 880], [0.26, 0.48, 1175], [0.52, 0.74, 880], [0.78, 1.00, 1175]];
-  for (let i = 0; i < n; i++) {
-    const t = i / sr; let v = 0;
-    for (const [a, b, f] of beeps) { if (t >= a && t < b) { const env = Math.min(1, (t - a) / 0.01, (b - t) / 0.03); v = (Math.sin(2 * Math.PI * f * t) > 0 ? 1 : -1) * 0.6 * env; } }
-    data[i] = Math.max(-1, Math.min(1, v)) * 32767;
-  }
-  const buf = new ArrayBuffer(44 + n * 2), dv = new DataView(buf);
-  const str = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
-  str(0, 'RIFF'); dv.setUint32(4, 36 + n * 2, true); str(8, 'WAVE'); str(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, sr, true); dv.setUint32(28, sr * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); str(36, 'data'); dv.setUint32(40, n * 2, true);
-  new Int16Array(buf, 44).set(data);
-  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
-}
 /* notifications système (iOS : seulement quand l'appli est installée sur l'écran d'accueil) */
 const Notif = {
   reg: null,
@@ -1996,9 +1985,44 @@ const Notif = {
     try { const reg = this.reg || await navigator.serviceWorker.ready; await reg.showNotification(title, { body, tag: tag || 'bhva-' + Date.now(), renotify: true, requireInteraction: true, icon: 'icons/bhva-180.png', badge: 'icons/bhva-180.png' }); return true; } catch (e) { try { new Notification(title, { body }); return true; } catch (e2) { return false; } }
   }
 };
+const SONS = [
+  ['carillon', 'Carillon doux', 'deux notes de cloche, comme une sonnette d\'entrée'],
+  ['xylo', 'Xylophone', 'quatre notes qui montent, légères'],
+  ['sonnette', 'Sonnette classique', 'ding-dong traditionnel'],
+  ['marimba', 'Marimba', 'trois notes rondes et chaleureuses'],
+  ['douce', 'Alarme douce', 'pulsation lente, peu agressive'],
+  ['forte', 'Alarme forte', 'bips puissants (l\'ancien son)']
+];
+function makeAlarmWav(kind = 'carillon') {
+  const sr = 22050; let dur = 2.6; const notes = []; /* [début, durée, fréquence, forme, volume] */
+  const tone = (t0, d, f, wave = 'sine', vol = 0.5, decay = true) => notes.push([t0, d, f, wave, vol, decay]);
+  if (kind === 'forte') { dur = 2.0; [[0, 880], [.26, 1175], [.52, 880], [.78, 1175]].forEach(([t, f]) => tone(t, .22, f, 'square', .55, false)); }
+  else if (kind === 'xylo') { dur = 2.4; [[0, 523], [.22, 659], [.44, 784], [.66, 1047]].forEach(([t, f]) => { tone(t, .5, f, 'sine', .5); tone(t, .3, f * 3, 'sine', .08); }); }
+  else if (kind === 'sonnette') { dur = 2.8; tone(0, 1.0, 659, 'sine', .55); tone(0, .5, 1318, 'sine', .1); tone(.55, 1.4, 523, 'sine', .55); tone(.55, .6, 1046, 'sine', .1); }
+  else if (kind === 'marimba') { dur = 2.6; [[0, 392], [.3, 523], [.6, 659]].forEach(([t, f]) => { tone(t, .7, f, 'sine', .5); tone(t, .25, f * 4, 'sine', .12); }); }
+  else if (kind === 'douce') { dur = 2.4; tone(0, .6, 440, 'tri', .45); tone(.9, .6, 440, 'tri', .45); }
+  else { dur = 2.8; tone(0, 1.2, 784, 'sine', .5); tone(0, .4, 1568, 'sine', .12); tone(.7, 1.6, 659, 'sine', .5); tone(.7, .5, 1318, 'sine', .1); }
+  const n = Math.floor(sr * dur), data = new Int16Array(n);
+  for (const [t0, d, f, wave, vol, decay] of notes) {
+    const a = Math.floor(t0 * sr), b = Math.min(n, Math.floor((t0 + d) * sr));
+    for (let i = a; i < b; i++) {
+      const t = (i - a) / sr; const ph = 2 * Math.PI * f * t;
+      let v = wave === 'square' ? (Math.sin(ph) > 0 ? 1 : -1) : wave === 'tri' ? (2 / Math.PI) * Math.asin(Math.sin(ph)) : Math.sin(ph);
+      const env = decay ? Math.min(1, t / 0.008) * Math.exp(-3.2 * t / d) : Math.min(1, t / 0.01, (d - t) / 0.03);
+      data[i] = Math.max(-32767, Math.min(32767, data[i] + v * vol * env * 32767));
+    }
+  }
+  const buf = new ArrayBuffer(44 + n * 2), dv = new DataView(buf);
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, 'RIFF'); dv.setUint32(4, 36 + n * 2, true); str(8, 'WAVE'); str(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, sr, true); dv.setUint32(28, sr * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); str(36, 'data'); dv.setUint32(40, n * 2, true);
+  new Int16Array(buf, 44).set(data);
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
+function currentSon() { const k = Store.settings().sonAlerte; return SONS.some(s => s[0] === k) ? k : 'carillon'; }
 const Alarm = {
   ctx: null, timer: null, el: null, unlocked: false, audio: null,
-  player() { if (!this.audio) { const a = new Audio(makeAlarmWav()); a.loop = true; a.volume = 1; a.preload = 'auto'; a.setAttribute('playsinline', ''); this.audio = a; } return this.audio; },
+  player(kind) { kind = kind || currentSon(); if (!this.audio || this.kind !== kind) { if (this.audio) { try { this.audio.pause(); } catch (e) { } } const a = new Audio(makeAlarmWav(kind)); a.loop = true; a.volume = 1; a.preload = 'auto'; a.setAttribute('playsinline', ''); this.audio = a; this.kind = kind; } return this.audio; },
+  async preview(kind) { this.unlocked = true; const a = this.player(kind); a.loop = false; a.currentTime = 0; try { await a.play(); } catch (e) { toast('Touchez d\'abord l\'écran pour autoriser le son', 'err'); } a.loop = true; },
   unlock() {
     try {
       const a = this.player(); const p = a.play(); if (p && p.then) p.then(() => { if (!this.timer) { a.pause(); a.currentTime = 0; } this.unlocked = true; const h = $('#sound-hint'); if (h) { h.remove(); toast('Sonnerie des alertes activée sur cet appareil', 'ok', 2500); } }).catch(() => { });
