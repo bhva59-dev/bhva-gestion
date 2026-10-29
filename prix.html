@@ -603,10 +603,11 @@ const Store = {
     const a = firebase.auth(); await a.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
     await new Promise(res => { const un = a.onAuthStateChanged(() => { un(); res(); }); });
     if (!a.currentUser) {
-      const pwd = await askShopPassword();
+      const pwd = (await askShopPassword(this._pwdErr || '') || '').trim();
       if (!pwd) { LS.set('fbSkip', true); const err = new Error('cancelled'); err.code = 'auth/cancelled'; throw err; }
-      try { await a.signInWithEmailAndPassword(FIREBASE_LOGIN, pwd); }
-      catch (e) { LS.del('shopPwdOk'); const msg = (e && (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials')) ? 'Mot de passe incorrect' : 'Connexion impossible : ' + (e && e.code || 'erreur'); toast(msg, 'err', 6000); return this.initFirebase(cfg); }
+      if (/^\d{3,5}$/.test(pwd)) { this._pwdErr = 'Ici il faut le mot de passe complet de la boucherie (il commence par « ElFen- »), pas le code à 4 chiffres.'; return this.initFirebase(cfg); }
+      try { await a.signInWithEmailAndPassword(FIREBASE_LOGIN, pwd); this._pwdErr = ''; }
+      catch (e) { LS.del('shopPwdOk'); const wrong = e && (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials'); this._pwdErr = wrong ? 'Mot de passe incorrect. Vérifiez les majuscules et le tiret : il commence par « ElFen- ».' : (e && e.code === 'auth/network-request-failed' ? 'Pas de connexion internet : réessayez.' : 'Connexion impossible : ' + (e && e.code || 'erreur')); return this.initFirebase(cfg); }
     }
     const fs = firebase.firestore(); try { fs.settings({ ignoreUndefinedProperties: true, merge: true }); } catch (e) { }
     try { await fs.enablePersistence({ synchronizeTabs: true }); } catch (e) { }
@@ -798,9 +799,9 @@ function confirmDialog(msg, { danger = false, ok = 'Confirmer', title = 'Confirm
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && _modal) closeModal(); });
 
-function askShopPassword() {
+function askShopPassword(err = '') {
   return new Promise(res => {
-    openModal({ title: 'BHVA · connexion de cet appareil', narrow: true, body: `<p>Entrez le mot de passe de la boucherie pour relier cet appareil à la base partagée (une seule fois).</p><input class="input input-lg" id="shop-pwd" type="password" placeholder="Mot de passe" autocomplete="current-password">`, footer: `<button class="btn" id="shop-pwd-skip">Travailler sans synchronisation</button><button class="btn btn-primary" id="shop-pwd-ok">Connecter</button>`, onClose: () => res(null) });
+    openModal({ title: 'Mot de passe de la boucherie', narrow: true, body: `<p>Première ouverture sur cet appareil : entrez le <strong>mot de passe de la boucherie</strong> (il commence par « ElFen- »). Ce n'est <strong>pas</strong> le code à 4 chiffres. Il n'est demandé qu'une seule fois.</p>${err ? `<div class="notice crit" style="margin-bottom:10px">${esc(err)}</div>` : ''}<input class="input input-lg" id="shop-pwd" type="password" placeholder="ElFen-…" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false">`, footer: `<button class="btn" id="shop-pwd-skip">Plus tard</button><button class="btn btn-primary" id="shop-pwd-ok">Connecter</button>`, onClose: () => res(null) });
     const ok = () => { const v = ($('#shop-pwd') || {}).value || ''; if (!v) return; _modal.onClose = null; closeModal(); res(v); };
     $('#shop-pwd-ok').addEventListener('click', ok); $('#shop-pwd').addEventListener('keydown', e => { if (e.key === 'Enter') ok(); });
     $('#shop-pwd-skip').addEventListener('click', () => { _modal.onClose = null; closeModal(); res(null); });
