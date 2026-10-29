@@ -484,6 +484,49 @@ details.adv summary{cursor:pointer;font-weight:600;color:var(--fg-2);padding:6px
   #print-root .sheet.orient-portrait{page:portrait}
   #print-root .sheet.orient-landscape{page:landscape}
 }
+
+/* ===== refonte tactile : gros boutons, tuiles, navigation par l'accueil ===== */
+html{font-size:17px}
+.nav{display:none!important}
+.masthead-inner{height:64px}
+.home-btn{background:rgba(255,255,255,.14);color:#fff;border-color:rgba(255,255,255,.35);min-height:46px;padding:0 18px 0 12px;font-size:1.05rem;border-radius:12px}
+.home-btn svg{width:22px;height:22px}
+body.is-home .home-btn,body.gestion-mode .home-btn{display:none}
+.btn{min-height:46px;font-size:1rem}
+.btn-sm{min-height:38px;font-size:.9rem}
+.btn-lg{min-height:54px;font-size:1.08rem}
+.btn-xl{min-height:64px;font-size:1.15rem;padding:0 22px;border-radius:14px;flex:1 1 220px}
+.btn-xl svg{width:22px;height:22px}
+.input,.select,select{min-height:48px;font-size:1.02rem}
+.chip{min-height:42px;font-size:.98rem;padding:0 16px}
+.home-top{display:flex;flex-wrap:wrap;gap:12px 28px;align-items:flex-end;justify-content:space-between;padding:6px 0 14px}
+.home-top h1{font-family:var(--font-display);font-weight:400;font-size:clamp(2rem,4vw,2.8rem);letter-spacing:.01em;text-transform:uppercase;margin:0}
+.home-summary{display:flex;flex-wrap:wrap;gap:8px}
+.sum{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:999px;background:var(--surface);border:1px solid var(--line);color:var(--fg);text-decoration:none;font-weight:600;font-size:.95rem;min-height:44px}
+.sum b{font-size:1.25rem}
+.sum.alert{background:#fff3cd;border-color:#f3c200}
+.quick{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;margin-bottom:14px}
+.tiles.small{grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}
+.tile{position:relative;display:flex;flex-direction:column;gap:6px;padding:20px 20px 18px;background:var(--surface);border:2px solid var(--line);border-radius:18px;text-decoration:none;color:inherit;min-height:160px;box-shadow:0 2px 0 rgba(0,0,0,.04);transition:transform .08s,border-color .12s}
+.tile:active{transform:scale(.98)}
+.tile.sm{min-height:112px;padding:16px}
+.tile .ico{width:52px;height:52px;border-radius:14px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);margin-bottom:4px}
+.tile .ico svg{width:28px;height:28px}
+.tile.sm .ico{width:40px;height:40px;border-radius:10px}.tile.sm .ico svg{width:22px;height:22px}
+.tile .t{font-size:1.35rem;font-weight:800;line-height:1.1}
+.tile.sm .t{font-size:1.05rem}
+.tile .n{font-size:2.3rem;font-weight:800;line-height:1;position:absolute;right:20px;top:18px;color:var(--fg-2)}
+.tile.sm .n{font-size:1.5rem;right:16px;top:14px}
+.tile .k{font-size:.92rem;color:var(--fg-2);margin-top:auto}
+.tile.alert{border-color:#f3c200;background:#fffbe6}
+.tile.alert .n{color:#b42318}
+.prod-grid{grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+.pcard{min-height:120px}
+.format-btn,.bg-opt{min-height:60px}
+.check input[type=checkbox],.check input[type=radio]{width:24px;height:24px}
+@media(min-width:1000px){.tiles{grid-template-columns:repeat(3,1fr)}.tiles.small{grid-template-columns:repeat(4,1fr)}.tile{min-height:180px}}
+@media(max-width:600px){html{font-size:16px}.tiles{grid-template-columns:repeat(2,1fr)}.tile{min-height:140px;padding:16px}.tile .t{font-size:1.1rem}.tile .n{font-size:1.8rem}.btn-xl{min-height:56px;font-size:1.02rem}}
 </style>
 
 </head>
@@ -498,6 +541,7 @@ details.adv summary{cursor:pointer;font-weight:600;color:var(--fg-2);padding:6px
         <span class="brand-sub">Prix · Traçabilité · Commandes · Stocks</span>
       </span>
     </a>
+    <a class="btn home-btn" id="home-btn" href="#accueil"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg> Accueil</a>
     <span class="mode-pill" id="mode-pill" title="Où sont enregistrées les données">…</span>
     <button class="bell" id="bell" data-act="notifs" aria-label="Notifications"></button>
   </div>
@@ -816,7 +860,7 @@ function render() {
     const active = document.activeElement; const fid = active && active.id && $('#view').contains(active) ? active.id : null;
     const selStart = fid && 'selectionStart' in active ? active.selectionStart : null;
     const scrollY = window.scrollY;
-    document.body.classList.toggle('gestion-mode', r === 'gestion');
+    document.body.classList.toggle('gestion-mode', r === 'gestion'); document.body.classList.toggle('is-home', r === 'accueil'); const hb = $('#home-btn'); if (hb) { const cur = ROUTES.find(x => x.id === r); hb.innerHTML = `${I.back} Accueil`; hb.title = cur ? cur.label : ''; }
     renderNav(); renderBell();
     const v = Views[r] || Views.accueil;
     let html; try { html = v(); } catch (e) { console.error(e); html = `<div class="notice crit">Erreur d'affichage : ${esc(e.message)}</div>`; }
@@ -935,27 +979,35 @@ Views.accueil = function () {
     { id: 'recettes', t: 'Recettes', d: 'Fiches codées 001, 002… reprises sur les étiquettes de traçabilité.', tag: `${Store.count('recettes')} fiche${Store.count('recettes') > 1 ? 's' : ''}` },
     { id: 'gestion', t: 'Prix BHVA Gestion', d: 'Application à part pour le téléphone du responsable : produits, prix, offres, origines. Synchronisée avec le comptoir.', tag: 'Application séparée · à installer sur le téléphone' }
   ];
+  const big = [
+    { id: 'prix', t: 'Affichage des prix', n: b.prix || 0, k: b.prix ? 'étiquettes en attente' : `${nbProd} produits`, alert: !!b.prix },
+    { id: 'trace', t: 'Traçabilité', n: lots, k: `lot${lots > 1 ? 's' : ''} fabriqué${lots > 1 ? 's' : ''} aujourd'hui`, alert: false },
+    { id: 'commandes', t: 'Commandes', n: cmds.length, k: 'à préparer ou remettre', alert: cmds.length > 0 },
+    { id: 'dlc', t: 'Dates DLC / DDM', n: dlcs.length, k: 'à traiter', alert: dlcs.length > 0 },
+    { id: 'evolution', t: 'Évolution des prix', n: priceChanges.length, k: 'changements sur 7 jours', alert: false },
+    { id: 'stocks', t: 'Stocks et pertes', n: stockLow, k: 'sous le seuil', alert: stockLow > 0 }
+  ];
+  const small = [
+    { id: 'factures', t: 'Factures & BL', n: factDue, k: factDue ? 'échues' : '', alert: factDue > 0 },
+    { id: 'recettes', t: 'Recettes', n: Store.count('recettes'), k: 'fiches', alert: false },
+    { id: 'gestion', t: 'Prix BHVA', n: '', k: 'application téléphone', alert: false },
+    { id: 'reglages', t: 'Réglages', n: '', k: '', alert: false }
+  ];
+  const tile = (m, cls) => `<a class="tile ${cls} ${m.alert ? 'alert' : ''}" href="#${m.id}"><span class="ico">${I[(ROUTES.find(r => r.id === m.id) || { icon: 'list' }).icon]}</span><span class="t">${m.t}</span>${m.n !== '' ? `<span class="n num">${m.n}</span>` : ''}<span class="k">${esc(m.k)}</span></a>`;
+  const last = priceChanges[0];
   return `
-  <div class="home-hero">
-    <div><div class="eyebrow">${esc(fmtDate(t, 'long'))}</div><h1>Ma journée</h1><p class="today-line">${esc(s.nom || 'Ma boucherie')} · ce qu'il y a à faire aujourd'hui.</p></div>
-    <div class="toolbar"><button class="btn btn-primary btn-lg" data-act="newreception">${I.download} Recevoir une livraison</button><a class="btn btn-lg" href="#prix">${I.print} Imprimer</a><button class="btn btn-lg" data-act="newfab">${I.cleaver} Fabriquer</button><button class="btn btn-lg" data-act="newfact" data-type="facture">${I.camera} Joindre une facture</button></div>
-  </div>
-  <div class="stats">
-    <a class="stat ${priceChanges.length ? 'alert' : ''}" href="#evolution" style="text-decoration:none"><span class="v num">${priceChanges.length}</span><span class="k">prix modifiés ces 7 jours${priceChanges.length ? ' · ' + esc(priceChanges[0].p.name) + ' ' + fmtMoney(priceChanges[0].h.de) + ' → ' + fmtMoney(priceChanges[0].h.a) : ''} · voir l'évolution</span></a>
-    <div class="stat ${cmds.length ? 'alert' : ''}"><span class="v num">${cmds.length}</span><span class="k">commandes à préparer ou remettre</span></div>
-    <div class="stat ${dlcs.length ? 'alert' : ''}"><span class="v num">${dlcs.length}</span><span class="k">dates à traiter (aujourd'hui, demain, dépassées)</span></div>
-    <div class="stat ${factDue ? 'alert' : ''}"><span class="v num">${factDue}</span><span class="k">factures échues à payer</span></div>
-    <div class="stat ${stockLow ? 'alert' : ''}"><span class="v num">${stockLow}</span><span class="k">produits sous le seuil de stock</span></div>
-  </div>
-  <div class="grid-2" style="margin-bottom:16px">
-    <div class="card"><div class="card-head"><h2>À traiter aujourd'hui</h2><a class="btn btn-sm" href="#dlc">Calendrier</a></div>
-      ${dlcs.length || cmds.length ? `<div class="list">${dlcs.slice(0, 6).map(x => `<div class="list-item"><span class="pill ${x.jours < 0 ? 'pill-crit' : x.jours === 0 ? 'pill-crit' : 'pill-warn'}">${esc(x.type)} ${esc(fmtDate(x.dlc).slice(0, 5))}</span><div class="main"><div class="title">${esc(x.produit)}${x.lot ? ` <span class="code-tag">${esc(x.lot)}</span>` : ''}</div><div class="sub">${esc(x.source)}${x.qte ? ' · ' + esc(x.qte) : ''}${x.detail ? ' · ' + esc(x.detail) : ''}</div></div><button class="btn btn-sm" data-act="dlctoggle" data-coll="${x.coll}" data-id="${x.id}">✓ Traité</button></div>`).join('')}${cmds.slice(0, 6).map(c => `<div class="list-item"><span class="pill pill-info">${esc(c.heure || '—')}</span><div class="main"><div class="title">${esc(c.client)} <span class="pill ${STATUT_CMD[c.statut]?.[1] || 'pill-neutral'}">${esc(STATUT_CMD[c.statut]?.[0] || c.statut)}</span></div><div class="sub" style="white-space:pre-wrap">${esc(c.texte)}</div></div><a class="btn btn-sm" href="#commandes">Voir</a></div>`).join('')}</div>` : '<div class="empty"><strong>Rien d\'urgent.</strong><span>Aucune date à traiter ni commande pour aujourd\'hui.</span></div>'}
-    </div>
-    <div class="card"><div class="card-head"><h2>Dernières activités</h2></div>
-      <div class="list">${recs.map(r => `<div class="list-item"><span class="pill pill-ok">Reçu</span><div class="main"><div class="title">${esc(r.produit)}</div><div class="sub">${esc(fmtDate(r.date))} · ${esc(r.fournisseur)} · lot ${esc(r.lotFournisseur)}</div></div></div>`).join('')}${journal.map(e => `<div class="list-item"><span class="pill pill-neutral">Imprimé</span><div class="main"><div class="title">${e.type === 'trace' ? `${esc(e.copies)} × ${esc(e.produit || '')}` : esc(e.detail || e.type)}</div><div class="sub">${esc(fmtDate(e.date))} ${esc(e.t || '')}</div></div></div>`).join('')}${recs.length || journal.length ? '' : '<div class="empty"><strong>Pas encore d\'activité.</strong><span>Réceptions et impressions apparaîtront ici.</span></div>'}</div>
+  <div class="home-top">
+    <div><div class="eyebrow">${esc(fmtDate(t, 'long'))}</div><h1>Ma journée</h1></div>
+    <div class="home-summary">
+      <a href="#commandes" class="sum ${cmds.length ? 'alert' : ''}"><b class="num">${cmds.length}</b> commande${cmds.length > 1 ? 's' : ''} aujourd'hui</a>
+      <a href="#dlc" class="sum ${dlcs.length ? 'alert' : ''}"><b class="num">${dlcs.length}</b> date${dlcs.length > 1 ? 's' : ''} à traiter</a>
+      <a href="#evolution" class="sum ${priceChanges.length ? 'alert' : ''}"><b class="num">${priceChanges.length}</b> prix modifié${priceChanges.length > 1 ? 's' : ''}${last ? ` · ${esc(last.p.name)} ${fmtMoney(last.h.a)}` : ''}</a>
+      <a href="#factures" class="sum ${factDue ? 'alert' : ''}"><b class="num">${factDue}</b> facture${factDue > 1 ? 's' : ''} échue${factDue > 1 ? 's' : ''}</a>
     </div>
   </div>
-  <div class="modules">${mods.map(m => `<a class="module" href="#${m.id}"><span class="ico">${I[(ROUTES.find(r => r.id === m.id) || { icon: 'list' }).icon]}</span><span><h3>${m.t}</h3><p>${m.d}</p><div class="tag">${esc(m.tag)}${m.alert ? ` · <span class="alert-tag">${esc(m.alert)}</span>` : ''}</div></span></a>`).join('')}</div>
+  <div class="quick"><button class="btn btn-xl btn-primary" data-act="newreception">${I.download} Recevoir une livraison</button><button class="btn btn-xl" data-act="newfab">${I.cleaver} Fabriquer un lot</button><button class="btn btn-xl" data-act="newfact" data-type="facture">${I.camera} Joindre une facture</button></div>
+  <div class="tiles">${big.map(m => tile(m, 'big')).join('')}</div>
+  <div class="tiles small">${small.map(m => tile(m, 'sm')).join('')}</div>
   ${nbProd === 0 ? `<div class="notice" style="margin-top:16px">Le catalogue est vide. <button class="btn btn-sm btn-primary" data-act="seed">Charger les 246 produits et les 6 recettes de départ</button></div>` : ''}`;
 };
 
@@ -1165,7 +1217,7 @@ Views.prix = function () {
   const ctx = { total, hpTotal, brTotal, sheets, hpItems, brItems, brPrev, printHp, printBr, s, qItem };
   _lastPrixCtx = ctx;
   return `
-  <div class="page-head"><div><div class="eyebrow">HP : feuilles A4 · Brother : rouleau 62 mm</div><h1>Affichage des prix</h1><p class="lead">Touchez un produit pour l'ajouter. Viande et fruits & légumes partent sur une feuille A4 (HP) ; l'épicerie part sur le rouleau Brother. Le format et le fond s'appliquent à la prochaine étiquette ; chaque étiquette en attente peut changer de fond.</p></div>
+  <div class="page-head"><div><div class="eyebrow">HP : feuilles A4 · Brother : rouleau 62 mm</div><h1>Affichage des prix</h1><p class="lead">Touchez un produit : il part dans la file. Viande et fruits & légumes → feuille A4 (HP), épicerie → rouleau Brother.</p></div>
     <div class="toolbar"><button class="btn" data-act="preview" ${total ? '' : 'disabled'}>${I.eye} Aperçu</button></div>
   </div>
   ${(() => { const un = unreadNotifs().filter(n => n.type === 'prix'); if (!un.length) return ''; const n0 = un[0]; return `<div class="notif-banner">${I.bell}<span class="fill">${un.length === 1 ? `Prix modifié : <strong>${esc(n0.nom)}</strong> ${esc(fmtMoney(n0.de))} → <strong>${esc(fmtMoney(n0.a))}</strong>` : `${un.length} prix modifiés`} · ${esc(fmtDateTime(n0.t))}</span><button class="btn btn-sm" data-act="notifs">Voir</button><button class="btn btn-sm" data-act="notifsread">OK, vu</button></div>`; })()}
