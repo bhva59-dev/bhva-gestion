@@ -614,6 +614,12 @@ const Store = {
     }
     this.ready = true;
   },
+  _onDenied() {
+    const u = window.firebase && firebase.apps.length ? firebase.auth().currentUser : null;
+    if (u && u.isAnonymous) { firebase.auth().signOut().catch(() => { }).finally(() => setTimeout(() => location.reload(), 300)); return; }
+    toast('Accès à la base partagée refusé : touchez la pastille rouge pour vous reconnecter.', 'err', 8000);
+    const pill = $('#mode-pill'); if (pill) { pill.textContent = 'NON SYNCHRONISÉ'; pill.className = 'mode-pill nosync'; pill.onclick = () => { firebase.auth().signOut().catch(() => { }).finally(() => location.reload()); }; }
+  },
   deviceId() { let d = LS.get('deviceId', ''); if (!d) { d = 'd-' + uid(); LS.set('deviceId', d); } return d; },
   async initFirebase(cfg) {
     if (!firebase.apps.length) firebase.initializeApp(cfg);
@@ -623,7 +629,7 @@ const Store = {
     if (!a.currentUser) {
       /* sans mot de passe : connexion anonyme (autorisée par les règles de la base) */
       let anonOk = false;
-      try { await a.signInAnonymously(); try { await fs0.collection('reglages').limit(1).get({ source: 'server' }); anonOk = true; } catch (e) { anonOk = !(e && e.code === 'permission-denied'); } } catch (e) { anonOk = false; }
+      try { await a.signInAnonymously(); await fs0.collection('reglages').limit(1).get({ source: 'server' }); anonOk = true; } catch (e) { console.warn('anonyme refusé', e && e.code); anonOk = false; }
       if (!anonOk) { try { await a.signOut(); } catch (e) { } }
     }
     if (!a.currentUser) {
@@ -642,7 +648,7 @@ const Store = {
       const un = fs.collection(c).onSnapshot(snap => {
         const m = new Map(); snap.docs.forEach(d => m.set(d.id, Object.assign({ id: d.id }, d.data())));
         this.cache[c] = m; if (first) { first = false; res(); } this.notify(c);
-      }, err => { this.errors++; console.warn('firebase', c, err); if (first) { first = false; res(); } });
+      }, err => { this.errors++; console.warn('firebase', c, err); if (err && err.code === 'permission-denied' && !this.denied) { this.denied = true; this._onDenied(); } if (first) { first = false; res(); } });
       this._unsubs.push(un);
     })));
     /* première connexion : si le nuage est vide et que cet appareil a des données, on les envoie */
