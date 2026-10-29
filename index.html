@@ -620,6 +620,16 @@ const Store = {
     toast('Accès à la base partagée refusé : touchez la pastille rouge pour vous reconnecter.', 'err', 8000);
     const pill = $('#mode-pill'); if (pill) { pill.textContent = 'NON SYNCHRONISÉ'; pill.className = 'mode-pill nosync'; pill.onclick = () => { firebase.auth().signOut().catch(() => { }).finally(() => location.reload()); }; }
   },
+  async refreshNotifs() {
+    if (this.mode !== 'firebase' || !this.fb || this._refreshing) return;
+    this._refreshing = true;
+    try {
+      const snap = await this.fb.collection('notifications').where('lu', '==', false).get({ source: 'server' });
+      let changed = false; const m = this.cache.notifications;
+      snap.docs.forEach(d => { if (!m.has(d.id)) { m.set(d.id, Object.assign({ id: d.id }, d.data())); changed = true; } });
+      if (changed) this.notify('notifications');
+    } catch (e) { } finally { this._refreshing = false; }
+  },
   deviceId() { let d = LS.get('deviceId', ''); if (!d) { d = 'd-' + uid(); LS.set('deviceId', d); } return d; },
   async initFirebase(cfg) {
     if (!firebase.apps.length) firebase.initializeApp(cfg);
@@ -680,7 +690,7 @@ const Store = {
     else this._persistLocal(c);
   },
   onChange(fn) { this._subs.add(fn); return () => this._subs.delete(fn); },
-  notify(c) { if (this._raf) return; this._raf = requestAnimationFrame(() => { this._raf = 0; this._subs.forEach(fn => { try { fn(c); } catch (e) { console.error(e); } }); }); },
+  notify(c) { (this._dirty || (this._dirty = new Set())).add(c); if (this._raf) return; this._raf = requestAnimationFrame(() => { this._raf = 0; const list = Array.from(this._dirty); this._dirty.clear(); this._subs.forEach(fn => { for (const x of list) { try { fn(x); } catch (e) { console.error(e); } } }); }); },
   settings() {
     const d = { nom: 'Boucherie El Fen', societe: 'SAS BHVA', adresse: '24 place de Verdun, 59650 Villeneuve-d\'Ascq', tel: '09 80 99 33 39', siret: '', agrement: '', brotherW: 62, brotherH: 100, brotherPrixH: 40, brotherOrient: 'portrait', ntfyTopic: '', fondDefaut: 'habituel', formatDefaut: 'A6', nomSurEtiquette: false, guides: true, veille: 4, logo: '', initiales: 'BHVA' };
     return Object.assign(d, this.get('reglages', 'boucherie') || {});
@@ -786,9 +796,10 @@ function navBadges() {
   return b;
 }
 
-let _renderQueued = false;
+let _renderQueued = false, _renderPending = false;
 function render() {
   if (!UI.ready) return;
+  const ae = document.activeElement; if (ae && ae.matches && ae.matches('input[data-commit="change"]') && $('#view').contains(ae)) { _renderPending = true; return; }
   if (_renderQueued) return; _renderQueued = true;
   requestAnimationFrame(() => {
     _renderQueued = false;
@@ -1242,7 +1253,7 @@ Views.gestion = function () {
     <div class="chips">${cats.map(c => `<button class="chip ${cat === c ? 'on' : ''}" data-act="pcat" data-v="${c}">${CAT_LABEL[c]}</button>`).join('')}<button class="chip ${cat === 'tous' ? 'on' : ''}" data-act="pcat" data-v="tous">Tous</button></div>
   </div>
   <p class="help" style="margin:8px 0 10px">Tapez le nouveau prix dans la case (ex. 28,80) : il est enregistré dès que vous quittez la case, et le comptoir reçoit l'alerte. Crayon : nom, unité, origine, offres (dès 2 kg… ou lot).</p>
-  <div class="card">${!prods.length ? `<div class="empty"><strong>Le catalogue est vide.</strong><button class="btn btn-primary" data-act="seed">Charger les 246 produits de départ</button></div>` : ''}${list.length ? list.map(p => `<div class="gest-row"><div><div class="n">${esc(p.name)}${p.actif === false ? ' <span class="pill pill-neutral">masqué</span>' : ''}</div><div class="s">${esc(p.cat === 'viande' ? (ESPECE_TAG[p.espece] || 'Viande') : CAT_LABEL[p.cat] || '')} · ${esc(UNIT_LABEL[p.unit] || p.unit)}${productLabelOrigin(p).lines[0] ? ' · ' + esc(productLabelOrigin(p).lines[0]) : ''}${(p.promos || []).length ? ' · ' + (p.promos || []).map(pr => esc(promoText(p, pr))).join(' · ') : ''}</div></div><input class="input num" type="text" inputmode="decimal" enterkeyhint="done" value="${p.price == null ? '' : p.price.toFixed(2).replace('.', ',')}" data-on="price" data-id="${p.id}" id="price-${p.id}" aria-label="Prix de ${esc(p.name)}"><button class="icon-btn" data-act="editp" data-id="${p.id}" aria-label="Modifier">${I.pencil}</button></div>`).join('') : `<div class="empty"><strong>Aucun produit.</strong></div>`}</div>
+  <div class="card">${!prods.length ? `<div class="empty"><strong>Le catalogue est vide.</strong><button class="btn btn-primary" data-act="seed">Charger les 246 produits de départ</button></div>` : ''}${list.length ? list.map(p => `<div class="gest-row"><div><div class="n">${esc(p.name)}${p.actif === false ? ' <span class="pill pill-neutral">masqué</span>' : ''}</div><div class="s">${esc(p.cat === 'viande' ? (ESPECE_TAG[p.espece] || 'Viande') : CAT_LABEL[p.cat] || '')} · ${esc(UNIT_LABEL[p.unit] || p.unit)}${productLabelOrigin(p).lines[0] ? ' · ' + esc(productLabelOrigin(p).lines[0]) : ''}${(p.promos || []).length ? ' · ' + (p.promos || []).map(pr => esc(promoText(p, pr))).join(' · ') : ''}</div></div><input class="input num" type="text" inputmode="decimal" enterkeyhint="done" value="${p.price == null ? '' : p.price.toFixed(2).replace('.', ',')}" data-on="price" data-commit="change" data-id="${p.id}" id="price-${p.id}" aria-label="Prix de ${esc(p.name)}"><button class="icon-btn" data-act="editp" data-id="${p.id}" aria-label="Modifier">${I.pencil}</button></div>`).join('') : `<div class="empty"><strong>Aucun produit.</strong></div>`}</div>
   ${window.FORCE_GESTION ? `<p class="help" style="margin-top:12px">${Store.mode === 'local' ? 'PAS SYNCHRONISÉ : les prix restent sur ce téléphone. Vérifiez la connexion internet puis touchez la pastille rouge en haut.' : 'Synchronisé : chaque changement part immédiatement au comptoir et en notification.'}</p><div class="row" style="margin-top:8px"><button class="btn btn-sm" data-act="pushtest">Envoyer une notification de test à l'iPad</button></div>` : `<div class="card card-pad stack" style="margin-top:14px"><h3>Installer sur ce téléphone</h3>
     <label class="check"><input type="checkbox" id="opt-gestdev" data-on="gestdev" ${LS.get('gestionDevice', false) ? 'checked' : ''}> Sur cet appareil, ouvrir directement la gestion des prix (jamais le comptoir)</label>
     <p class="help">Cochez cette case, puis dans le navigateur : Partager → « Ajouter à l'écran d'accueil » (iPhone : Safari ; Android : Chrome, menu ⋮ → « Ajouter à l'écran d'accueil »). L'icône ouvrira cette application, synchronisée en direct avec le comptoir.${un ? ` · ${un} changement(s) pas encore vu(s) au comptoir.` : ''}</p>
@@ -1918,15 +1929,18 @@ document.addEventListener('click', e => {
   try { const r = fn(el, e); if (r && r.catch) r.catch(err => { console.error(err); }); } catch (err) { console.error(err); toast('Erreur : ' + err.message, 'err'); }
 });
 let _inputTimer = 0;
+const commitOnChange = el => el.type === 'checkbox' || el.tagName === 'SELECT' || el.type === 'number' || el.dataset.commit === 'change';
 document.addEventListener('input', e => {
   const el = e.target.closest('[data-on]'); if (!el) return; const fn = Inputs[el.dataset.on]; if (!fn) return;
-  if (el.type === 'checkbox' || el.tagName === 'SELECT' || el.type === 'number') return;
+  if (commitOnChange(el)) return;
   clearTimeout(_inputTimer); _inputTimer = setTimeout(() => fn(el), el.dataset.on.includes('search') ? 120 : 0);
 });
 document.addEventListener('change', e => {
   const el = e.target.closest('[data-on]'); if (!el) return; const fn = Inputs[el.dataset.on]; if (!fn) return;
-  if (el.type === 'checkbox' || el.tagName === 'SELECT' || el.type === 'number') { const r = fn(el); if (r && r.catch) r.catch(err => console.error(err)); }
+  if (commitOnChange(el)) { const r = fn(el); if (r && r.catch) r.catch(err => console.error(err)); }
 });
+/* pendant qu'on tape dans une case « prix », l'écran ne se redessine pas (sinon la case se remettait à l'ancienne valeur) */
+document.addEventListener('focusout', e => { if (e.target && e.target.matches && e.target.matches('input[data-commit="change"]')) setTimeout(() => { if (_renderPending) { _renderPending = false; render(); } }, 50); });
 $('#file-photo').addEventListener('change', e => onPhotoPicked(e.target.files[0]));
 $('#file-import').addEventListener('change', async e => {
   const file = e.target.files[0]; if (!file) return;
@@ -1999,7 +2013,8 @@ const Alarm = {
 function soundHint() { if (window.FORCE_GESTION || Alarm.unlocked || $('#sound-hint')) return; const d = document.createElement('div'); d.id = 'sound-hint'; d.className = 'sound-hint'; d.innerHTML = `${I.bell} Touchez l'écran une fois pour activer la sonnerie des alertes`; d.addEventListener('pointerdown', () => Alarm.unlock()); document.body.appendChild(d); }
 /* écran toujours allumé (iPad comptoir) */
 const Wake = { lock: null, async on() { if (window.FORCE_GESTION || !('wakeLock' in navigator)) return; try { this.lock = await navigator.wakeLock.request('screen'); this.lock.addEventListener('release', () => { this.lock = null; }); } catch (e) { } } };
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { Wake.on(); try { Alarm.ctx && Alarm.ctx.state === 'suspended' && Alarm.ctx.resume(); } catch (e) { } } });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { Wake.on(); Store.refreshNotifs(); try { Alarm.ctx && Alarm.ctx.state === 'suspended' && Alarm.ctx.resume(); } catch (e) { } } });
+if (!window.FORCE_GESTION) setInterval(() => { if (document.visibilityState === 'visible') Store.refreshNotifs(); }, 15000);
 
 const Standby = {
   timer: 0, el: null, clock: 0,
