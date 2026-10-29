@@ -94,7 +94,7 @@ button{cursor:pointer}
 .mobile-bar{display:none}
 @media(max-width:899px){.mobile-bar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:35;align-items:center;gap:10px;background:var(--fg);color:var(--bg);padding:10px max(16px,env(safe-area-inset-right,0px)) max(10px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));box-shadow:0 -4px 16px rgba(0,0,0,.2)}.mobile-bar .btn{background:var(--accent);border-color:var(--accent);color:#fff}.page.has-bar{padding-bottom:90px}.toast-wrap{bottom:max(72px,calc(env(safe-area-inset-bottom,0px) + 72px))}}
 .mode-pill{margin-left:auto;font-size:.72rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:5px 10px;border-radius:999px;background:rgba(255,255,255,.18);white-space:nowrap}
-.mode-pill.local{background:rgba(0,0,0,.25)}
+.mode-pill.local{background:rgba(0,0,0,.25)}.mode-pill.nosync{background:#d7263d;color:#fff;border-color:#d7263d;cursor:pointer;animation:blink 1.2s infinite}@keyframes blink{50%{opacity:.55}}
 .bell{position:relative;width:38px;height:38px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;display:grid;place-items:center;flex:none}
 .bell svg{width:18px;height:18px}
 .bell .bell-n{position:absolute;top:-4px;right:-4px;background:#ffd60a;color:#111;font-size:.7rem;font-weight:800;border-radius:999px;padding:1px 6px;min-width:18px}
@@ -603,7 +603,7 @@ const Store = {
     await new Promise(res => { const un = a.onAuthStateChanged(() => { un(); res(); }); });
     if (!a.currentUser) {
       const pwd = (await askShopPassword(this._pwdErr || '') || '').trim();
-      if (!pwd) { LS.set('fbSkip', true); const err = new Error('cancelled'); err.code = 'auth/cancelled'; throw err; }
+      if (!pwd) { this._pwdErr = 'Le mot de passe est obligatoire pour que les prix soient synchronisés.'; return this.initFirebase(cfg); }
       if (/^\d{3,5}$/.test(pwd)) { this._pwdErr = 'Ici il faut le mot de passe complet de la boucherie (il commence par « ElFen- »), pas le code à 4 chiffres.'; return this.initFirebase(cfg); }
       try { await a.signInWithEmailAndPassword(FIREBASE_LOGIN, pwd); this._pwdErr = ''; }
       catch (e) { LS.del('shopPwdOk'); const wrong = e && (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials'); this._pwdErr = wrong ? 'Mot de passe incorrect. Vérifiez les majuscules et le tiret : il commence par « ElFen- ».' : (e && e.code === 'auth/network-request-failed' ? 'Pas de connexion internet : réessayez.' : 'Connexion impossible : ' + (e && e.code || 'erreur')); return this.initFirebase(cfg); }
@@ -800,10 +800,9 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && _modal) cl
 
 function askShopPassword(err = '') {
   return new Promise(res => {
-    openModal({ title: 'Mot de passe de la boucherie', narrow: true, body: `<p>Première ouverture sur cet appareil : entrez le <strong>mot de passe de la boucherie</strong> (il commence par « ElFen- »). Ce n'est <strong>pas</strong> le code à 4 chiffres. Il n'est demandé qu'une seule fois.</p>${err ? `<div class="notice crit" style="margin-bottom:10px">${esc(err)}</div>` : ''}<input class="input input-lg" id="shop-pwd" type="password" placeholder="ElFen-…" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false">`, footer: `<button class="btn" id="shop-pwd-skip">Plus tard</button><button class="btn btn-primary" id="shop-pwd-ok">Connecter</button>`, onClose: () => res(null) });
+    openModal({ title: 'Mot de passe de la boucherie', narrow: true, body: `<p>Première ouverture sur cet appareil : entrez le <strong>mot de passe de la boucherie</strong> (il commence par « ElFen- »). Ce n'est <strong>pas</strong> le code à 4 chiffres. Il n'est demandé qu'une seule fois.</p>${err ? `<div class="notice crit" style="margin-bottom:10px">${esc(err)}</div>` : ''}<input class="input input-lg" id="shop-pwd" type="password" placeholder="ElFen-…" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false">`, footer: `<button class="btn btn-primary btn-lg" id="shop-pwd-ok" style="width:100%">Connecter</button>`, onClose: () => res(null) });
     const ok = () => { const v = ($('#shop-pwd') || {}).value || ''; if (!v) return; _modal.onClose = null; closeModal(); res(v); };
     $('#shop-pwd-ok').addEventListener('click', ok); $('#shop-pwd').addEventListener('keydown', e => { if (e.key === 'Enter') ok(); });
-    $('#shop-pwd-skip').addEventListener('click', () => { _modal.onClose = null; closeModal(); res(null); });
   });
 }
 /* form helpers */
@@ -1918,7 +1917,9 @@ const Standby = {
     const pill = $('#mode-pill'); pill.textContent = 'Chargement…';
     await Store.init();
     initCaps().then(() => { if (UI.ready) render(); });
-    pill.textContent = Store.mode === 'db' ? 'Base partagée' : Store.mode === 'firebase' ? 'Synchronisé' : 'Cet appareil'; pill.className = 'mode-pill ' + (Store.mode === 'local' ? 'local' : '');
+    const hasFb = typeof FIREBASE_CONFIG !== 'undefined' && !!FIREBASE_CONFIG;
+    pill.textContent = Store.mode === 'db' ? 'Base partagée' : Store.mode === 'firebase' ? 'Synchronisé' : (hasFb ? 'NON SYNCHRONISÉ' : 'Cet appareil'); pill.className = 'mode-pill ' + (Store.mode === 'local' ? (hasFb ? 'nosync' : 'local') : '');
+    if (Store.mode === 'local' && hasFb) { pill.onclick = () => Actions.fbreconnect(); pill.title = 'Touchez pour entrer le mot de passe de la boucherie et synchroniser cet appareil'; }
     pill.title = Store.mode === 'db' ? 'Les données sont enregistrées dans la base partagée du site et visibles depuis tous vos appareils.' : 'Les données sont enregistrées dans ce navigateur, sur cet appareil.';
     UI.ready = true;
     if (Store.mode !== 'db' && Store.count('produits') === 0 && !LS.get('seeded', false)) { LS.set('seeded', true); for (let i = 0; i < CATALOGUE.length; i++) { const c = CATALOGUE[i]; await Store.set('produits', c.id, Object.assign({}, c, { actif: true, ordre: i, detail: {}, code: '' })); } for (const rec of RECETTES_INIT) await Store.set('recettes', 'k-' + rec.code, Object.assign({}, rec, { actif: true, cree: new Date().toISOString() })); }
