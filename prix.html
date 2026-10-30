@@ -2295,7 +2295,7 @@ if (!window.FORCE_GESTION) setInterval(() => { if (document.visibilityState === 
 
 const Standby = {
   timer: 0, el: null, clock: 0,
-  arm() { clearTimeout(this.timer); const m = Number(Store.settings().veille); if (!m || m <= 0 || this.el) return; this.timer = setTimeout(() => this.show(), m * 60000); },
+  arm() { clearTimeout(this.timer); /* écran de veille désactivé : l'iPad reste sur l'application */ },
   show() {
     if (this.el || _modal || Alarm.el || currentRoute() === 'gestion') { this.arm(); return; }
     const el = document.createElement('div'); el.className = 'standby'; el.id = 'standby'; this.el = el; document.body.appendChild(el);
