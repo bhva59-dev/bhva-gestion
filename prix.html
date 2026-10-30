@@ -569,6 +569,13 @@ textarea.input{min-height:90px}
 .photo-cell img{width:100%;aspect-ratio:1;object-fit:cover;display:block;cursor:pointer}
 .photo-cell .icon-btn{position:absolute;top:6px;right:6px;background:rgba(255,255,255,.92)}
 .photo-cap{font-size:.8rem;padding:6px 8px;color:var(--fg-2)}
+.voice-box{display:flex;flex-direction:column;align-items:center;gap:10px;padding:10px 0}
+.voice-btn{width:110px;height:110px;border-radius:50%;border:0;background:var(--accent);color:#fff;display:grid;place-items:center;box-shadow:0 8px 24px rgba(22,59,220,.35)}
+.voice-btn svg{width:48px;height:48px}
+.voice-btn.rec{background:#d7263d;animation:blink 1s infinite;box-shadow:0 8px 24px rgba(215,38,61,.4)}
+.voice-time{font-size:1.6rem;font-weight:800}.voice-state{color:var(--fg-2);font-size:.95rem;text-align:center}
+.alarm button.alarm-play{background:#067647!important;color:#fff!important;border-color:#067647!important;font-size:1.6rem;padding:22px 32px;min-height:84px;border-radius:18px;width:min(92vw,520px);margin-top:6px}
+.alarm button.alarm-play.playing{background:#0b8f57!important}
 </style>
 
 </head>
@@ -672,7 +679,7 @@ const LS = {
 };
 
 /* ===================== store (db capability, or local file) ===================== */
-const COLLS = ['produits', 'reglages', 'receptions', 'fabrications', 'journal', 'commandes', 'dlc', 'factures', 'stock', 'mouvements', 'recettes', 'notifications', 'equipements', 'temperatures', 'tracephotos'];
+const COLLS = ['produits', 'reglages', 'receptions', 'fabrications', 'journal', 'commandes', 'dlc', 'factures', 'stock', 'mouvements', 'recettes', 'notifications', 'equipements', 'temperatures', 'tracephotos', 'vocaux'];
 const Store = {
   mode: 'local', db: null, cache: {}, ready: false, _subs: new Set(), _raf: 0, _unsubs: [], errors: 0,
   fb: null,
@@ -812,6 +819,7 @@ const isArtifact = () => !!(window.claude && typeof window.claude.use === 'funct
 
 /* ===================== icons ===================== */
 const I = {
+  mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/></svg>',
   thermo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.76V5a2 2 0 0 0-4 0v9.76a4 4 0 1 0 4 0z"/></svg>',
   chart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 6-7"/></svg>',
   home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8v9a2 2 0 0 1-2 2h-4v-7H9v7H5a2 2 0 0 1-2-2z"/></svg>',
@@ -864,8 +872,8 @@ async function notify(entry) {
   const all = Store.all('notifications').sort((a, b) => (a.t || '').localeCompare(b.t || ''));
   for (const old of all.slice(0, Math.max(0, all.length - 120))) { try { await Store.remove('notifications', old.id); } catch (e) { } }
   await Store.set('notifications', 'n-' + uid(), Object.assign({ t: new Date().toISOString(), lu: false, de_: Store.deviceId() }, entry));
-  const txt = entry.type === 'prix' ? `${entry.nom} : ${fmtMoney(entry.de)} → ${fmtMoney(entry.a)}` : entry.type === 'message' ? entry.texte : `${entry.nom}`;
-  sendPush(entry.type === 'prix' ? 'Prix modifié' : entry.type === 'message' ? 'Message du responsable' : 'Nouveau produit', txt);
+  const txt = entry.type === 'prix' ? `${entry.nom} : ${fmtMoney(entry.de)} → ${fmtMoney(entry.a)}` : (entry.type === 'message' || entry.type === 'vocal') ? entry.texte : `${entry.nom}`;
+  sendPush(entry.type === 'prix' ? 'Prix modifié' : entry.type === 'vocal' ? 'Message vocal du responsable' : entry.type === 'message' ? 'Message du responsable' : 'Nouveau produit', txt);
 }
 /* notification push (téléphones / iPad verrouillés) via ntfy.sh — gratuit, sans compte : l'appli ntfy abonnée au sujet reçoit une vraie notification avec son */
 function pushTopic() { const s = Store.settings(); return String(s.ntfyTopic || (typeof NTFY_TOPIC !== 'undefined' ? NTFY_TOPIC : '') || '').trim(); }
@@ -1267,7 +1275,7 @@ Views.prix = function () {
   <div class="page-head"><div><div class="eyebrow">HP : feuilles A4 · Brother : rouleau 62 mm</div><h1>Affichage des prix</h1><p class="lead">Touchez un produit : il part dans la file. Viande et fruits & légumes → feuille A4 (HP), épicerie → rouleau Brother.</p></div>
     <div class="toolbar"><button class="btn" data-act="preview" ${total ? '' : 'disabled'}>${I.eye} Aperçu</button></div>
   </div>
-  ${(() => { const un = unreadNotifs().filter(n => n.type === 'prix' || n.type === 'message'); if (!un.length) return ''; const n0 = un[0]; return `<div class="notif-banner">${I.bell}<span class="fill">${un.length === 1 ? (n0.type === 'message' ? `Message : <strong>${esc(n0.texte)}</strong>` : `Prix modifié : <strong>${esc(n0.nom)}</strong> ${esc(fmtMoney(n0.de))} → <strong>${esc(fmtMoney(n0.a))}</strong>`) : `${un.length} nouvelles alertes`} · ${esc(fmtDateTime(n0.t))}</span><button class="btn btn-sm" data-act="notifs">Voir</button><button class="btn btn-sm" data-act="notifsread">OK, vu</button></div>`; })()}
+  ${(() => { const un = unreadNotifs().filter(n => n.type === 'prix' || n.type === 'message' || n.type === 'vocal'); if (!un.length) return ''; const n0 = un[0]; return `<div class="notif-banner">${I.bell}<span class="fill">${un.length === 1 ? ((n0.type === 'message' || n0.type === 'vocal') ? `Message : <strong>${esc(n0.texte)}</strong>${n0.type === 'vocal' ? ` <button class="btn btn-sm" data-act="vocplay" data-id="${esc(n0.vocalId || '')}">▶ Écouter</button>` : ''}` : `Prix modifié : <strong>${esc(n0.nom)}</strong> ${esc(fmtMoney(n0.de))} → <strong>${esc(fmtMoney(n0.a))}</strong>`) : `${un.length} nouvelles alertes`} · ${esc(fmtDateTime(n0.t))}</span><button class="btn btn-sm" data-act="notifs">Voir</button><button class="btn btn-sm" data-act="notifsread">OK, vu</button></div>`; })()}
   <div class="grid-2">
     <div>
       <div class="card card-pad prices-controls">
@@ -1441,7 +1449,7 @@ Views.gestion = function () {
   const list = prods.filter(p => (cat === 'tous' || p.cat === cat) && (!nq || normStr(p.name).includes(nq) || normStr(p.code || '').includes(nq))).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
   const un = unreadNotifs().length;
   return `
-  <div class="gest-top"><div><div class="eyebrow">Synchronisé avec le comptoir</div><h1>Prix BHVA</h1></div><div class="row" style="gap:8px"><button class="btn btn-dark" data-act="msgnew" aria-label="Message au comptoir">${I.bell} Message</button><button class="btn btn-primary" data-act="newp">${I.plus} Nouveau</button></div></div>
+  <div class="gest-top"><div><div class="eyebrow">Synchronisé avec le comptoir</div><h1>Prix BHVA</h1></div><div class="row" style="gap:8px"><button class="btn btn-dark" data-act="voicenew" aria-label="Message vocal">${I.mic} Vocal</button><button class="btn btn-dark" data-act="msgnew" aria-label="Message au comptoir">${I.bell} Message</button><button class="btn btn-primary" data-act="newp">${I.plus} Nouveau</button></div></div>
   <div class="gest-head">
     <div class="search">${I.search}<input class="input input-lg" id="prod-search" placeholder="Rechercher un produit…" value="${esc(ProdOpts.q)}" data-on="psearch" autocomplete="off"></div>
     <div class="chips">${cats.map(c => `<button class="chip ${cat === c ? 'on' : ''}" data-act="pcat" data-v="${c}">${CAT_LABEL[c]}</button>`).join('')}<button class="chip ${cat === 'tous' ? 'on' : ''}" data-act="pcat" data-v="tous">Tous</button></div>
@@ -2121,6 +2129,11 @@ const Actions = {
   tphotodel: async el => { if (await confirmDialog('Supprimer définitivement cette photo de traçabilité ?', { danger: true, ok: 'Supprimer' })) { await Store.remove('tracephotos', el.dataset.id); render(); } },
   tphotoprint: () => tracePhotoPrint(),
   msgnew: () => { openModal({ title: 'Message au comptoir', narrow: true, body: `<p class="help">Il s'affiche en grand sur l'iPad avec la sonnerie, jusqu'à « OK, vu ».</p><textarea class="input input-lg" id="msg-text" rows="3" placeholder="Ex. : N'oubliez pas les œufs" autofocus></textarea><div class="chips" style="margin-top:10px">${['N\'oubliez pas les œufs', 'Appelez-moi', 'Rangez la chambre froide', 'Livraison en route', 'Préparez la commande'].map(t => `<button type="button" class="chip" data-act="msgpreset" data-v="${esc(t)}">${esc(t)}</button>`).join('')}</div>`, footer: `<button class="btn" data-close="1">Annuler</button><button class="btn btn-primary btn-lg" data-act="msgsend">${I.bell} Envoyer</button>` }); },
+  voicenew: () => Voice.open(),
+  voicetoggle: () => Voice.toggle(),
+  voicesend: () => Voice.send(),
+  alarmplay: el => playVocal(el.dataset.id, el),
+  vocplay: el => playVocal(el.dataset.id, el),
   msgpreset: el => { const t = $('#msg-text'); if (t) { t.value = el.dataset.v; t.focus(); } },
   msgsend: async () => { const t = (($('#msg-text') || {}).value || '').trim(); if (!t) { toast('Écrivez un message', 'err'); return; } closeModal(); await notify({ type: 'message', texte: t, nom: t }); toast('Message envoyé au comptoir', 'ok'); },
   sonplay: el => Alarm.preview(el.dataset.v),
@@ -2185,7 +2198,7 @@ $('#file-import').addEventListener('change', async e => {
 /* ===================== notifications ===================== */
 function openNotifs() {
   const all = Store.all('notifications').sort((a, b) => (b.t || '').localeCompare(a.t || '')).slice(0, 60);
-  const line = n => n.type === 'prix' ? `<strong>${esc(n.nom)}</strong> : ${esc(fmtMoney(n.de))} → <strong>${esc(fmtMoney(n.a))}</strong>${n.offres ? ' · offres modifiées' : ''}` : n.type === 'produit' ? `Nouveau produit : <strong>${esc(n.nom)}</strong> ${esc(fmtMoney(n.a))}` : esc(n.texte || n.type);
+  const line = n => n.type === 'vocal' ? `${esc(n.texte)} <button class="btn btn-sm" data-act="vocplay" data-id="${esc(n.vocalId || '')}">▶ Écouter</button>` : n.type === 'prix' ? `<strong>${esc(n.nom)}</strong> : ${esc(fmtMoney(n.de))} → <strong>${esc(fmtMoney(n.a))}</strong>${n.offres ? ' · offres modifiées' : ''}` : n.type === 'produit' ? `Nouveau produit : <strong>${esc(n.nom)}</strong> ${esc(fmtMoney(n.a))}` : esc(n.texte || n.type);
   openModal({ title: 'Notifications', narrow: true, body: all.length ? `<div class="list">${all.map(n => `<div class="list-item" style="${n.lu ? 'opacity:.6' : ''}"><span class="pill ${n.lu ? 'pill-neutral' : 'pill-warn'}">${n.lu ? 'lu' : 'nouveau'}</span><div class="main"><div class="title">${line(n)}</div><div class="sub">${esc(fmtDateTime(n.t))}</div></div>${n.lu ? '' : `<button class="btn btn-sm" data-act="notifread" data-id="${n.id}">OK</button>`}</div>`).join('')}</div>` : '<div class="empty"><strong>Aucune notification.</strong><span>Les changements de prix faits depuis l\'application de gestion apparaîtront ici.</span></div>', footer: `<button class="btn" data-close="1">Fermer</button>${unreadNotifs().length ? '<button class="btn btn-primary" data-act="notifsread">Tout marquer comme vu</button>' : ''}` });
 }
 let _seenNotifs = null;
@@ -2274,17 +2287,18 @@ const Alarm = {
   start(n, test = false) {
     if (window.FORCE_GESTION) return;
     Standby.hide && Standby.el && Standby.hide();
-    const txt = n.type === 'prix' ? `${esc(n.nom)}<br><span class="alarm-price">${esc(fmtMoney(n.de))} → ${esc(fmtMoney(n.a))}</span>` : n.type === 'message' ? `${esc(n.texte)}` : `Nouveau produit : ${esc(n.nom)}`;
-    const titre = n.type === 'prix' ? 'PRIX MODIFIÉ' : n.type === 'message' ? 'MESSAGE' : 'NOUVEAU PRODUIT';
+    const txt = n.type === 'prix' ? `${esc(n.nom)}<br><span class="alarm-price">${esc(fmtMoney(n.de))} → ${esc(fmtMoney(n.a))}</span>` : n.type === 'message' ? `${esc(n.texte)}` : n.type === 'vocal' ? `${n.duree || ''} s` : `Nouveau produit : ${esc(n.nom)}`;
+    const titre = n.type === 'prix' ? 'PRIX MODIFIÉ' : n.type === 'message' ? 'MESSAGE' : n.type === 'vocal' ? 'MESSAGE VOCAL' : 'NOUVEAU PRODUIT';
     if (!this.el) { this.el = document.createElement('div'); this.el.className = 'alarm'; document.body.appendChild(this.el); }
     const nb = unreadNotifs().length;
-    this.el.innerHTML = `<div class="alarm-ico">${I.bell}</div><div class="alarm-title">${titre}</div><div class="alarm-txt">${txt}</div><div class="alarm-sub">${esc(fmtDateTime(n.t))}${nb > 1 ? ` · ${nb} changements à voir` : ''}${test ? ' · test' : ''}</div><button class="btn alarm-ok" data-act="alarmok">OK, vu — arrêter la sonnerie</button>${this.unlocked ? '' : '<div class="alarm-sub" style="margin-top:8px">Pas de son ? Touchez l\'écran une fois au démarrage de l\'application pour activer la sonnerie.</div>'}`;
+    this.el.innerHTML = `<div class="alarm-ico">${I.bell}</div><div class="alarm-title">${titre}</div><div class="alarm-txt">${txt}</div><div class="alarm-sub">${esc(fmtDateTime(n.t))}${nb > 1 ? ` · ${nb} changements à voir` : ''}${test ? ' · test' : ''}</div>${n.type === 'vocal' ? `<button class="btn alarm-play" data-act="alarmplay" data-id="${esc(n.vocalId || '')}">▶ Écouter le message</button>` : ''}<button class="btn alarm-ok" data-act="alarmok">OK, vu${n.type === 'vocal' ? '' : ' — arrêter la sonnerie'}</button>${this.unlocked ? '' : '<div class="alarm-sub" style="margin-top:8px">Pas de son ? Touchez l\'écran une fois au démarrage de l\'application pour activer la sonnerie.</div>'}`;
     this.ring();
     Notif.show(titre, n.type === 'prix' ? `${n.nom} : ${fmtMoney(n.de)} → ${fmtMoney(n.a)}` : n.type === 'message' ? n.texte : n.nom, 'bhva-alerte');
     this.el.onpointerdown = () => { if (!this.unlocked) this.unlock(); if (this.audio && this.audio.paused) this.ring(); };
     try { navigator.vibrate && navigator.vibrate([300, 200, 300]); } catch (e) { }
   },
-  stop() { clearInterval(this.timer); this.timer = null; try { if (this.audio) { this.audio.pause(); this.audio.currentTime = 0; } } catch (e) { } if (this.el) { this.el.remove(); this.el = null; } }
+  hush() { clearInterval(this.timer); this.timer = null; try { if (this.audio) { this.audio.pause(); this.audio.currentTime = 0; } } catch (e) { } },
+  stop() { this.hush(); if (_vocPlayer) { try { _vocPlayer.pause(); } catch (e) { } } if (this.el) { this.el.remove(); this.el = null; } }
 };
 ['pointerdown', 'touchend', 'keydown'].forEach(ev => document.addEventListener(ev, () => { if (!Alarm.unlocked) Alarm.unlock(); }, { passive: true }));
 function soundHint() { if (window.FORCE_GESTION || Alarm.unlocked || $('#sound-hint')) return; const d = document.createElement('div'); d.id = 'sound-hint'; d.className = 'sound-hint'; d.innerHTML = `${I.bell} Touchez ici pour activer la sonnerie des alertes${Notif.supported() && Notif.state() === 'default' ? ' et les notifications' : ''}`; d.addEventListener('click', () => { if (Notif.supported() && Notif.state() === 'default') Notif.ask(); }); d.addEventListener('pointerdown', () => Alarm.unlock()); document.body.appendChild(d); }
@@ -2438,6 +2452,50 @@ async function tracePhotoPrint() {
     pages.push({ w: 210, h: 297, html: `<div class="sheet" style="width:210mm;height:297mm;padding:12mm;box-sizing:border-box;display:block;font-family:Archivo,Arial,sans-serif;color:#111"><div style="display:flex;justify-content:space-between;border-bottom:2px solid #111;padding-bottom:3mm;margin-bottom:5mm;font-size:9pt"><div><b>${esc(s.nom || 'BHVA')}</b> · traçabilité simplifiée · du ${esc(fmtDate(PhotoOpts.from))} au ${esc(fmtDate(PhotoOpts.to))}</div><div>page ${pages.length + 1} / ${Math.ceil(list.length / per)}</div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:5mm">${chunk.map(p => `<div style="border:1px solid #ccc;padding:2mm"><img src="${p.photo}" style="width:100%;height:70mm;object-fit:contain;display:block"><div style="font-size:9pt;margin-top:1.5mm"><b>${esc(fmtDateTime(p.t))}</b>${p.note ? ' · ' + esc(p.note) : ''}</div></div>`).join('')}</div></div>` }); }
   if (!pages.length) return;
   try { if (canDirectPrint()) await directPrint(pages, null, `tracabilite-photos-${todayStr()}.pdf`); else { const blob = await pagesToPdf(pages, { scale: 2 }); await deliverPdf(blob, `tracabilite-photos-${todayStr()}.pdf`); } } catch (e) { toast('Échec : ' + e.message, 'err', 6000); }
+}
+
+/* ===================== MESSAGES VOCAUX (Prix BHVA → comptoir) ===================== */
+const Voice = {
+  rec: null, chunks: [], blob: null, url: null, t0: 0, timer: null, mime: '',
+  supported() { return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder); },
+  open() {
+    this.reset();
+    openModal({ title: 'Message vocal au comptoir', narrow: true, body: `<p class="help">Appuyez sur le micro, parlez (60 s max), appuyez à nouveau pour arrêter, puis Envoyer. L'iPad sonne et affiche un gros bouton ▶ pour écouter.</p><div class="voice-box"><button class="voice-btn" id="voice-btn" data-act="voicetoggle" aria-label="Enregistrer">${I.mic}</button><div class="voice-time num" id="voice-time">0:00</div><div class="voice-state" id="voice-state">${this.supported() ? 'Prêt à enregistrer' : 'Micro non disponible sur cet appareil'}</div><audio id="voice-prev" controls hidden style="width:100%"></audio></div>`, footer: `<button class="btn" data-close="1">Annuler</button><button class="btn btn-primary btn-lg" id="voice-send" data-act="voicesend" disabled>${I.bell} Envoyer</button>`, onClose: () => this.reset() });
+  },
+  reset() { try { if (this.rec && this.rec.state !== 'inactive') this.rec.stop(); } catch (e) { } if (this.stream) { this.stream.getTracks().forEach(t => t.stop()); this.stream = null; } clearInterval(this.timer); this.rec = null; this.chunks = []; this.blob = null; if (this.url) { URL.revokeObjectURL(this.url); this.url = null; } },
+  async toggle() {
+    if (!this.supported()) { toast('Micro non disponible : ouvrez l\'application depuis son icône et autorisez le micro', 'err', 6000); return; }
+    if (this.rec && this.rec.state === 'recording') { this.rec.stop(); return; }
+    try { this.stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { toast('Accès au micro refusé. Réglages iOS → Prix BHVA → Micro.', 'err', 7000); return; }
+    const mimes = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', '']; this.mime = mimes.find(m => !m || MediaRecorder.isTypeSupported(m)) || '';
+    const opts = { audioBitsPerSecond: 32000 }; if (this.mime) opts.mimeType = this.mime;
+    try { this.rec = new MediaRecorder(this.stream, opts); } catch (e) { this.rec = new MediaRecorder(this.stream); }
+    this.chunks = []; this.rec.ondataavailable = e => { if (e.data && e.data.size) this.chunks.push(e.data); };
+    this.rec.onstop = () => { this.blob = new Blob(this.chunks, { type: this.rec.mimeType || this.mime || 'audio/mp4' }); this.url = URL.createObjectURL(this.blob); const a = $('#voice-prev'); if (a) { a.src = this.url; a.hidden = false; } const b = $('#voice-btn'); if (b) b.classList.remove('rec'); const st = $('#voice-state'); if (st) st.textContent = `Enregistré · ${Math.round(this.blob.size / 1024)} Ko · réécoutez puis Envoyer`; const s = $('#voice-send'); if (s) s.disabled = false; clearInterval(this.timer); if (this.stream) { this.stream.getTracks().forEach(t => t.stop()); this.stream = null; } };
+    this.rec.start(250); this.t0 = Date.now(); const b = $('#voice-btn'); if (b) b.classList.add('rec'); const st = $('#voice-state'); if (st) st.textContent = 'Enregistrement… appuyez pour arrêter'; const s = $('#voice-send'); if (s) s.disabled = true; const a = $('#voice-prev'); if (a) a.hidden = true;
+    this.timer = setInterval(() => { const sec = Math.floor((Date.now() - this.t0) / 1000); const tt = $('#voice-time'); if (tt) tt.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; if (sec >= 60 && this.rec && this.rec.state === 'recording') this.rec.stop(); }, 250);
+  },
+  async send() {
+    if (!this.blob) return; const dur = Math.max(1, Math.round((Date.now() - this.t0) / 1000));
+    if (this.blob.size > 800 * 1024) { toast('Message trop long pour être envoyé : refaites plus court', 'err'); return; }
+    const data = await new Promise(res => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.readAsDataURL(this.blob); });
+    const id = 'v-' + uid();
+    for (const old of Store.all('vocaux')) { if ((old.t || '') < new Date(Date.now() - 48 * 3600000).toISOString()) { try { await Store.remove('vocaux', old.id); } catch (e) { } } }
+    await Store.set('vocaux', id, { t: new Date().toISOString(), audio: data, duree: dur, mime: this.blob.type });
+    const txt = `Message vocal (${dur} s)`;
+    await notify({ type: 'vocal', texte: txt, nom: txt, vocalId: id, duree: dur });
+    this.reset(); closeModal(); toast('Message vocal envoyé au comptoir', 'ok');
+  }
+};
+let _vocPlayer = null;
+function playVocal(id, btn) {
+  const v = Store.get('vocaux', id); if (!v) { toast('Ce message vocal n\'est plus disponible (conservé 48 h)', 'err'); return; }
+  Alarm.hush();
+  if (_vocPlayer) { try { _vocPlayer.pause(); } catch (e) { } }
+  _vocPlayer = new Audio(v.audio); _vocPlayer.setAttribute('playsinline', '');
+  if (btn) { btn.classList.add('playing'); btn.innerHTML = `${I.bell} Lecture…`; }
+  _vocPlayer.onended = () => { if (btn) { btn.classList.remove('playing'); btn.innerHTML = `▶ Réécouter`; } };
+  _vocPlayer.play().catch(() => toast('Lecture impossible', 'err'));
 }
 
 </script>
