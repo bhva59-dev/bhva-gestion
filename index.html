@@ -576,6 +576,7 @@ textarea.input{min-height:90px}
 .voice-time{font-size:1.6rem;font-weight:800}.voice-state{color:var(--fg-2);font-size:.95rem;text-align:center}
 .alarm button.alarm-play{background:#067647!important;color:#fff!important;border-color:#067647!important;font-size:1.6rem;padding:22px 32px;min-height:84px;border-radius:18px;width:min(92vw,520px);margin-top:6px}
 .alarm button.alarm-play.playing{background:#0b8f57!important}
+.gest-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:6px}.gest-actions .btn{padding:0 8px;min-height:48px}
 </style>
 
 </head>
@@ -1448,7 +1449,8 @@ Views.gestion = function () {
   const list = prods.filter(p => (cat === 'tous' || p.cat === cat) && (!nq || normStr(p.name).includes(nq) || normStr(p.code || '').includes(nq))).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
   const un = unreadNotifs().length;
   return `
-  <div class="gest-top"><div><div class="eyebrow">Synchronisé avec le comptoir</div><h1>Prix BHVA</h1></div><div class="row" style="gap:8px"><button class="btn btn-dark" data-act="voicenew" aria-label="Message vocal">${I.mic} Vocal</button><button class="btn btn-dark" data-act="msgnew" aria-label="Message au comptoir">${I.bell} Message</button><button class="btn btn-primary" data-act="newp">${I.plus} Nouveau</button></div></div>
+  <div class="gest-top"><div><div class="eyebrow">Synchronisé avec le comptoir</div><h1>Prix BHVA</h1></div></div>
+  <div class="gest-actions"><button class="btn btn-dark" data-act="voicenew" aria-label="Message vocal">${I.mic} Vocal</button><button class="btn btn-dark" data-act="msgnew" aria-label="Message au comptoir">${I.bell} Message</button><button class="btn btn-primary" data-act="newp">${I.plus} Produit</button></div>
   <div class="gest-head">
     <div class="search">${I.search}<input class="input input-lg" id="prod-search" placeholder="Rechercher un produit…" value="${esc(ProdOpts.q)}" data-on="psearch" autocomplete="off"></div>
     <div class="chips">${cats.map(c => `<button class="chip ${cat === c ? 'on' : ''}" data-act="pcat" data-v="${c}">${CAT_LABEL[c]}</button>`).join('')}<button class="chip ${cat === 'tous' ? 'on' : ''}" data-act="pcat" data-v="tous">Tous</button></div>
