@@ -568,7 +568,8 @@ textarea.input{min-height:90px}
 .photo-cell{position:relative;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
 .photo-cell img{width:100%;aspect-ratio:1;object-fit:cover;display:block;cursor:pointer}
 .photo-cell .icon-btn{position:absolute;top:6px;right:6px;background:rgba(255,255,255,.92)}
-.photo-cap{font-size:.8rem;padding:6px 8px;color:var(--fg-2)}
+.photo-cap{font-size:.8rem;padding:6px 8px;color:var(--fg-2);display:flex;align-items:center;justify-content:space-between;gap:6px}.photo-cap .icon-btn{position:static;width:36px;height:36px;flex:none}
+.tp-badge{position:absolute;left:6px;top:6px;padding:4px 10px;border-radius:999px;font:700 .78rem Inter,sans-serif;border:0}.tp-badge.up{background:#fff3cd;color:#7a5b00}.tp-badge.ok{background:rgba(6,118,71,.92);color:#fff}.tp-badge.err{background:#b42318;color:#fff;min-height:36px}
 .voice-box{display:flex;flex-direction:column;align-items:center;gap:10px;padding:10px 0}
 .voice-btn{width:110px;height:110px;border-radius:50%;border:0;background:var(--accent);color:#fff;display:grid;place-items:center;box-shadow:0 8px 24px rgba(22,59,220,.35)}
 .voice-btn svg{width:48px;height:48px}
@@ -680,7 +681,7 @@ const LS = {
 };
 
 /* ===================== store (db capability, or local file) ===================== */
-const COLLS = ['produits', 'reglages', 'receptions', 'fabrications', 'journal', 'commandes', 'dlc', 'factures', 'stock', 'mouvements', 'recettes', 'notifications', 'equipements', 'temperatures', 'tracephotos', 'vocaux'];
+const COLLS = ['produits', 'reglages', 'receptions', 'fabrications', 'journal', 'commandes', 'dlc', 'factures', 'stock', 'mouvements', 'recettes', 'notifications', 'equipements', 'temperatures', 'vocaux'];
 const Store = {
   mode: 'local', db: null, cache: {}, ready: false, _subs: new Set(), _raf: 0, _unsubs: [], errors: 0,
   fb: null,
@@ -737,6 +738,7 @@ const Store = {
     if (!firebase.apps.length) firebase.initializeApp(cfg);
     const a = firebase.auth(); await a.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
     const fs0 = firebase.firestore(); try { fs0.settings({ ignoreUndefinedProperties: true, merge: true }); } catch (e) { }
+    try { await fs0.enablePersistence({ synchronizeTabs: true }); } catch (e) { }
     await new Promise(res => { const un = a.onAuthStateChanged(() => { un(); res(); }); });
     if (!a.currentUser) {
       /* sans mot de passe : connexion anonyme (autorisée par les règles de la base) */
@@ -752,7 +754,6 @@ const Store = {
       catch (e) { LS.del('shopPwdOk'); const wrong = e && (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials'); this._pwdErr = wrong ? 'Mot de passe incorrect. Vérifiez les majuscules et le tiret : il commence par « ElFen- ».' : (e && e.code === 'auth/network-request-failed' ? 'Pas de connexion internet : réessayez.' : 'Connexion impossible : ' + (e && e.code || 'erreur')); return this.initFirebase(cfg); }
     }
     const fs = fs0;
-    try { await fs.enablePersistence({ synchronizeTabs: true }); } catch (e) { }
     this.fb = fs; this.mode = 'firebase';
     const localData = {}; COLLS.forEach(c => { localData[c] = LS.get('coll:' + c, {}); });
     await Promise.all(COLLS.map(c => new Promise(res => {
@@ -2125,10 +2126,11 @@ const Actions = {
   equipdel: async el => { if (await confirmDialog('Retirer cet équipement de la liste ? Les relevés passés restent conservés.', { danger: true, ok: 'Retirer' })) { await Store.patch('equipements', el.dataset.id, { actif: false }); openEquipManager(); render(); } },
   tphotocapture: () => { const i = $('#file-trace'); i.setAttribute('capture', 'environment'); i.click(); },
   tphotopick: () => { const i = $('#file-trace'); i.removeAttribute('capture'); i.click(); },
-  tphotoremove: el => { _tracePending.splice(Number(el.dataset.i), 1); render(); },
-  tphotosave: () => tracePhotoSave(),
-  tphotoview: el => { const p = Store.get('tracephotos', el.dataset.id); if (p) openModal({ title: fmtDateTime(p.t) + (p.note ? ' · ' + p.note : ''), body: `<img src="${esc(p.photo)}" style="width:100%;border-radius:8px">`, footer: `<button class="btn" data-close="1">Fermer</button>` }); },
-  tphotodel: async el => { if (await confirmDialog('Supprimer définitivement cette photo de traçabilité ?', { danger: true, ok: 'Supprimer' })) { await Store.remove('tracephotos', el.dataset.id); render(); } },
+  tphotoview: el => tracePhotoView(el.dataset.id),
+  tphotoretry: el => TP.retry(el.dataset.id),
+  tphotonote: el => { const p = TP.get(el.dataset.id); if (!p) return; openModal({ title: 'Note de la photo', narrow: true, body: `<input class="input input-lg" id="tp-note" value="${esc(p.note || '')}" placeholder="Fournisseur, produit, lot…">`, footer: `<button class="btn" data-close="1">Annuler</button><button class="btn btn-primary" data-act="tphotonotesave" data-id="${p.id}">Enregistrer</button>` }); },
+  tphotonotesave: el => { const v = (($('#tp-note') || {}).value || '').trim(); closeModal(); TP.setNote(el.dataset.id, v); },
+  tphotodel: async el => { if (await confirmDialog('Supprimer définitivement cette photo de traçabilité ?', { danger: true, ok: 'Supprimer' })) { closeModal(); TP.remove(el.dataset.id); } },
   tphotoprint: () => tracePhotoPrint(),
   msgnew: () => { openModal({ title: 'Message au comptoir', narrow: true, body: `<p class="help">Il s'affiche en grand sur l'iPad avec la sonnerie, jusqu'à « OK, vu ».</p><textarea class="input input-lg" id="msg-text" rows="3" placeholder="Ex. : N'oubliez pas les œufs" autofocus></textarea><div class="chips" style="margin-top:10px">${['N\'oubliez pas les œufs', 'Appelez-moi', 'Rangez la chambre froide', 'Livraison en route', 'Préparez la commande'].map(t => `<button type="button" class="chip" data-act="msgpreset" data-v="${esc(t)}">${esc(t)}</button>`).join('')}</div>`, footer: `<button class="btn" data-close="1">Annuler</button><button class="btn btn-primary btn-lg" data-act="msgsend">${I.bell} Envoyer</button>` }); },
   voicenew: () => Voice.open(),
@@ -2156,8 +2158,8 @@ const Inputs = {
   evosearch: el => { EvoOpts.q = el.value; render(); },
   tempval: el => { const v = num(el.value); TempOpts.vals[el.dataset.id] = v == null ? '' : v; render(); },
   tempdate: el => { TempOpts.date = el.value || todayStr(); TempOpts.vals = {}; render(); },
-  tphotofrom: el => { PhotoOpts.from = el.value; render(); },
-  tphototo: el => { PhotoOpts.to = el.value; render(); },
+  tphotofrom: el => { PhotoOpts.from = el.value || addDays(todayStr(), -14); render(); },
+  tphototo: el => { PhotoOpts.to = el.value || todayStr(); render(); },
   tphotoq: el => { PhotoOpts.q = el.value; render(); },
   price: async el => { const v = num(el.value); const p = Store.get('produits', el.dataset.id); if (!p) return; if (v == null || v < 0) { el.value = p.price == null ? '' : p.price.toFixed(2).replace('.', ','); toast('Prix non valide — l\'ancien prix est conservé', 'err'); return; } el.value = v.toFixed(2).replace('.', ','); if (p.price === v) return; const now = new Date().toISOString(); const hist = (p.historique || []).slice(-400).concat([{ t: now, de: p.price, a: v }]); await Store.patch('produits', el.dataset.id, { price: v, maj: now, majPrix: now, historique: hist }); toast(`${p.name} : ${fmtMoney(v)}${UNIT_LABEL[p.unit] || ''} enregistré`, 'ok', 1800); await notify({ type: 'prix', produitId: p.id, nom: p.name, de: p.price, a: v }); },
   stmin: async el => { const v = num(el.value); const p = Store.get('produits', el.dataset.id); const s = Store.get('stock', el.dataset.id) || { qte: null, unite: p && p.unit === 'kg' ? 'kg' : 'piece' }; if (s.min === v) return; await Store.set('stock', el.dataset.id, Object.assign({}, s, { min: v, nom: p ? p.name : '' })); },
@@ -2416,43 +2418,99 @@ async function tempPrint() {
   try { if (canDirectPrint()) await directPrint(pages, null, `temperatures-${todayStr()}.pdf`); else { const blob = await pagesToPdf(pages, { scale: 2.2 }); await deliverPdf(blob, `temperatures-${todayStr()}.pdf`); } } catch (e) { toast('Échec : ' + e.message, 'err', 6000); }
 }
 
-/* ===================== TRAÇABILITÉ SIMPLIFIÉE (photos d'étiquettes) ===================== */
-const PhotoOpts = { from: addDays(todayStr(), -30), to: todayStr(), q: '' };
-let _tracePending = [];
-function tracePhotosTab() {
-  const list = Store.all('tracephotos').filter(p => p.date >= PhotoOpts.from && p.date <= PhotoOpts.to && (!PhotoOpts.q || normStr(p.note || '').includes(normStr(PhotoOpts.q)))).sort((a, b) => (b.t || '').localeCompare(a.t || ''));
-  const total = Store.count('tracephotos'); const oldest = Store.all('tracephotos').map(p => p.date).sort()[0];
-  return `
-  <div class="card card-pad stack">
-    <div class="spread"><div><h2 style="margin:0">Suivi de traçabilité simplifié</h2><p class="help">Prenez en photo l'étiquette de chaque produit reçu (origine, lot, DLC). Tout est horodaté et conservé — ${total} photo${total > 1 ? 's' : ''}${oldest ? ` depuis le ${esc(fmtDate(oldest))}` : ''}.</p></div></div>
-    <div class="photo-drop"><button class="btn btn-xl btn-primary" data-act="tphotocapture">${I.camera} Prendre en photo une étiquette</button><button class="btn btn-xl" data-act="tphotopick">${I.upload} Choisir des photos</button></div>
-    <div id="tphoto-pending" class="photo-grid">${_tracePending.map((p, i) => `<div class="photo-cell"><img src="${p.url}" alt=""><button class="icon-btn" data-act="tphotoremove" data-i="${i}">${I.x}</button></div>`).join('')}</div>
-    ${_tracePending.length ? `<div class="row"><input class="input input-lg fill" id="tphoto-note" placeholder="Note facultative : fournisseur, produit…"><button class="btn btn-xl btn-primary" data-act="tphotosave">${I.check} Enregistrer ${_tracePending.length} photo${_tracePending.length > 1 ? 's' : ''}</button></div>` : ''}
-  </div>
-  <div class="card card-pad stack" style="margin-top:14px">
-    <div class="spread" style="flex-wrap:wrap;gap:10px"><h2 style="margin:0">Historique de traçabilité</h2><div class="row" style="gap:8px;flex-wrap:wrap"><input class="input" type="date" value="${PhotoOpts.from}" data-on="tphotofrom" style="max-width:170px"><span>→</span><input class="input" type="date" value="${PhotoOpts.to}" data-on="tphototo" style="max-width:170px"><input class="input" placeholder="Note…" value="${esc(PhotoOpts.q)}" data-on="tphotoq" style="max-width:160px"><button class="btn btn-sm" data-act="tphotoprint" ${list.length ? '' : 'disabled'}>${I.print} Imprimer la période</button></div></div>
-    ${list.length ? `<div class="photo-grid big">${list.slice(0, 120).map(p => `<div class="photo-cell"><img src="${esc(p.photo)}" alt="" data-act="tphotoview" data-id="${p.id}"><div class="photo-cap">${esc(fmtDateTime(p.t))}${p.note ? ' · ' + esc(p.note) : ''}</div><button class="icon-btn" data-act="tphotodel" data-id="${p.id}">${I.trash}</button></div>`).join('')}</div>${list.length > 120 ? `<p class="help">${list.length - 120} autres photos : réduisez la période.</p>` : ''}` : '<div class="empty"><span>Aucune photo sur cette période.</span></div>'}
-  </div>`;
+/* ===================== TRAÇABILITÉ SIMPLIFIÉE (photos d'étiquettes) =====================
+   Une photo = enregistrée tout de suite (aucune lecture, aucune attente).
+   Base : « tracephotos » = date, heure, note, vignette légère ; « tracephotos_full » = la photo lisible.
+   Les photos ne sont jamais chargées au démarrage : seulement la période affichée, et la grande photo à l'ouverture. */
+const PhotoOpts = { from: addDays(todayStr(), -14), to: todayStr(), q: '' };
+const TP = {
+  items: [], key: '', loading: false, state: {}, retryData: {},
+  async load(force) {
+    const key = PhotoOpts.from + '|' + PhotoOpts.to;
+    if (!force && this.key === key) return; this.key = key; this.loading = true;
+    try {
+      let fresh = [];
+      if (Store.mode === 'firebase') {
+        const snap = await Store.fb.collection('tracephotos').where('date', '>=', PhotoOpts.from).where('date', '<=', PhotoOpts.to).get();
+        fresh = snap.docs.map(d => Object.assign({}, d.data(), { id: d.id }));
+      } else fresh = LS.get('tp:meta', []).filter(x => x.date >= PhotoOpts.from && x.date <= PhotoOpts.to);
+      const ids = new Set(fresh.map(x => x.id));
+      this.items = fresh.concat(this.items.filter(x => this.state[x.id] && this.state[x.id] !== 'ok' && !ids.has(x.id)));
+    } catch (e) { toast('Historique indisponible pour le moment (' + (e.code || e.message) + ')', 'err', 6000); }
+    this.items.sort((a, b) => (b.t || '').localeCompare(a.t || '')); this.loading = false; render();
+  },
+  get(id) { return this.items.find(x => x.id === id) || null; },
+  save(meta, full) {
+    this.items.unshift(meta); this.state[meta.id] = 'up'; render();
+    if (Store.mode !== 'firebase') { const arr = LS.get('tp:meta', []); arr.push(meta); LS.set('tp:meta', arr); LS.set('tp:full:' + meta.id, full); this.state[meta.id] = 'ok'; render(); return; }
+    const fs = Store.fb; const b = fs.batch();
+    b.set(fs.collection('tracephotos_full').doc(meta.id), { photo: full, t: meta.t });
+    const body = Object.assign({}, meta); delete body.id; b.set(fs.collection('tracephotos').doc(meta.id), body);
+    b.commit().then(() => { this.state[meta.id] = 'ok'; delete this.retryData[meta.id]; render(); })
+      .catch(e => { this.state[meta.id] = 'err'; this.retryData[meta.id] = { meta, full }; render(); toast('Photo pas encore envoyée (' + (e.code || 'réseau') + ') : touchez « Réessayer »', 'err', 6000); });
+  },
+  retry(id) { const r = this.retryData[id]; if (!r) return; this.items = this.items.filter(x => x.id !== id); this.save(r.meta, r.full); },
+  async full(id) {
+    const it = this.get(id); if (it && it.photo) return it.photo;
+    if (this.retryData[id]) return this.retryData[id].full;
+    if (Store.mode !== 'firebase') return LS.get('tp:full:' + id, '');
+    try { const d = await Store.fb.collection('tracephotos_full').doc(id).get(); return d.exists ? d.data().photo : (it ? it.thumb : ''); } catch (e) { return it ? it.thumb : ''; }
+  },
+  async setNote(id, note) { const it = this.get(id); if (it) it.note = note; render(); if (Store.mode === 'firebase') { try { await Store.fb.collection('tracephotos').doc(id).update({ note }); } catch (e) { toast('Note non enregistrée', 'err'); } } else { const arr = LS.get('tp:meta', []); const x = arr.find(a => a.id === id); if (x) { x.note = note; LS.set('tp:meta', arr); } } },
+  async remove(id) {
+    this.items = this.items.filter(x => x.id !== id); render();
+    if (Store.mode === 'firebase') { const fs = Store.fb; const b = fs.batch(); b.delete(fs.collection('tracephotos').doc(id)); b.delete(fs.collection('tracephotos_full').doc(id)); try { await b.commit(); } catch (e) { toast('Suppression refusée', 'err'); } }
+    else { LS.set('tp:meta', LS.get('tp:meta', []).filter(x => x.id !== id)); LS.del('tp:full:' + id); }
+  }
+};
+function imgToTwo(file) {
+  return new Promise((res, rej) => {
+    const img = new Image(); const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const out = [[1400, 0.62], [260, 0.55]].map(([max, q]) => { const k = Math.min(1, max / Math.max(img.width, img.height)); const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', q); });
+      URL.revokeObjectURL(url); res(out);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('Image illisible')); };
+    img.src = url;
+  });
 }
 async function tracePhotoAdd(files) {
-  for (const f of Array.from(files || [])) { try { const small = await resizeImage(f, 1100, 0.7); _tracePending.push({ blob: small, url: URL.createObjectURL(small) }); } catch (e) { toast('Photo illisible', 'err'); } }
-  render();
+  const list = Array.from(files || []); if (!list.length) return;
+  if (PhotoOpts.to < todayStr()) { PhotoOpts.to = todayStr(); TP.key = ''; }
+  for (const f of list) {
+    try { const [full, thumb] = await imgToTwo(f); const t = new Date().toISOString(); TP.save({ id: 'tp-' + uid(), t, date: todayStr(), note: '', thumb }, full); }
+    catch (e) { toast('Photo illisible', 'err'); }
+  }
+  toast(list.length > 1 ? `${list.length} photos enregistrées` : 'Photo enregistrée', 'ok', 1800);
 }
-async function tracePhotoSave() {
-  const note = (($('#tphoto-note') || {}).value || '').trim(); if (!_tracePending.length) return;
-  showBusy('Enregistrement…');
-  try {
-    for (const p of _tracePending) { const data = await new Promise(res => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.readAsDataURL(p.blob); }); await Store.set('tracephotos', 'tp-' + uid(), { t: new Date().toISOString(), date: todayStr(), note, photo: data }); }
-    toast(`${_tracePending.length} photo${_tracePending.length > 1 ? 's' : ''} enregistrée${_tracePending.length > 1 ? 's' : ''}`, 'ok'); _tracePending = [];
-    await logJournal({ type: 'trace', detail: 'Photos de traçabilité enregistrées' });
-  } catch (e) { toast('Échec : ' + (e.message || e), 'err', 6000); } finally { hideBusy(); render(); }
+function tracePhotosTab() {
+  TP.load();
+  const nq = normStr(PhotoOpts.q);
+  const list = TP.items.filter(p => p.date >= PhotoOpts.from && p.date <= PhotoOpts.to && (!nq || normStr(p.note || '').includes(nq)));
+  const badge = id => { const s = TP.state[id]; return s === 'up' ? '<span class="tp-badge up">envoi…</span>' : s === 'err' ? `<button class="tp-badge err" data-act="tphotoretry" data-id="${id}">Réessayer</button>` : '<span class="tp-badge ok">✓</span>'; };
+  return `
+  <div class="card card-pad stack">
+    <div><h2 style="margin:0">Suivi de traçabilité simplifié</h2><p class="help">Une photo de l'étiquette ou de la feuille de traçabilité : elle est enregistrée tout de suite, avec la date et l'heure. Même sans réseau, elle part dès que la connexion revient.</p></div>
+    <div class="photo-drop"><button class="btn btn-xl btn-primary" data-act="tphotocapture">${I.camera} Prendre en photo</button><button class="btn btn-xl" data-act="tphotopick">${I.upload} Choisir des photos</button></div>
+  </div>
+  <div class="card card-pad stack" style="margin-top:14px">
+    <div class="spread" style="flex-wrap:wrap;gap:10px"><h2 style="margin:0">Historique de traçabilité <span class="muted" style="font-weight:500;font-size:1rem">· ${list.length} photo${list.length > 1 ? 's' : ''}${TP.loading ? ' · chargement…' : ''}</span></h2><div class="row" style="gap:8px;flex-wrap:wrap"><input class="input" type="date" value="${PhotoOpts.from}" data-on="tphotofrom" style="max-width:170px"><span>→</span><input class="input" type="date" value="${PhotoOpts.to}" data-on="tphototo" style="max-width:170px"><input class="input" placeholder="Note…" value="${esc(PhotoOpts.q)}" data-on="tphotoq" style="max-width:160px"><button class="btn btn-sm" data-act="tphotoprint" ${list.length ? '' : 'disabled'}>${I.print} Imprimer la période</button></div></div>
+    ${list.length ? `<div class="photo-grid big">${list.slice(0, 200).map(p => `<div class="photo-cell"><img src="${esc(p.thumb || p.photo || '')}" alt="" data-act="tphotoview" data-id="${p.id}" loading="lazy">${badge(p.id)}<div class="photo-cap"><span>${esc(fmtDateTime(p.t))}${p.note ? ' · ' + esc(p.note) : ''}</span><button class="icon-btn" data-act="tphotonote" data-id="${p.id}" aria-label="Note">${I.pencil}</button></div></div>`).join('')}</div>${list.length > 200 ? `<p class="help">${list.length - 200} autres photos : réduisez la période.</p>` : ''}` : `<div class="empty"><span>${TP.loading ? 'Chargement…' : 'Aucune photo sur cette période.'}</span></div>`}
+  </div>`;
+}
+async function tracePhotoView(id) {
+  const p = TP.get(id); if (!p) return;
+  openModal({ title: fmtDateTime(p.t) + (p.note ? ' · ' + p.note : ''), body: `<img id="tp-big" src="${esc(p.thumb || p.photo || '')}" style="width:100%;border-radius:8px;filter:blur(${p.photo ? 0 : 2}px)">`, footer: `<button class="btn btn-danger" data-act="tphotodel" data-id="${id}" style="margin-right:auto">${I.trash} Supprimer</button><button class="btn" data-close="1">Fermer</button>` });
+  const src = await TP.full(id); const im = $('#tp-big'); if (im && src) { im.src = src; im.style.filter = 'none'; }
 }
 async function tracePhotoPrint() {
-  const list = Store.all('tracephotos').filter(p => p.date >= PhotoOpts.from && p.date <= PhotoOpts.to).sort((a, b) => (a.t || '').localeCompare(b.t || '')); const s = Store.settings();
+  const list = TP.items.filter(p => p.date >= PhotoOpts.from && p.date <= PhotoOpts.to).slice().sort((a, b) => (a.t || '').localeCompare(b.t || '')); const s = Store.settings();
+  if (!list.length) return;
+  showBusy('Récupération des photos…'); const fulls = [];
+  try { for (let i = 0; i < list.length; i++) { const m = $('#busy-msg'); if (m) m.textContent = `Récupération des photos… ${i + 1} / ${list.length}`; fulls.push(await TP.full(list[i].id)); } } finally { hideBusy(); }
   const per = 6; const pages = [];
   for (let i = 0; i < list.length; i += per) { const chunk = list.slice(i, i + per);
-    pages.push({ w: 210, h: 297, html: `<div class="sheet" style="width:210mm;height:297mm;padding:12mm;box-sizing:border-box;display:block;font-family:Archivo,Arial,sans-serif;color:#111"><div style="display:flex;justify-content:space-between;border-bottom:2px solid #111;padding-bottom:3mm;margin-bottom:5mm;font-size:9pt"><div><b>${esc(s.nom || 'BHVA')}</b> · traçabilité simplifiée · du ${esc(fmtDate(PhotoOpts.from))} au ${esc(fmtDate(PhotoOpts.to))}</div><div>page ${pages.length + 1} / ${Math.ceil(list.length / per)}</div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:5mm">${chunk.map(p => `<div style="border:1px solid #ccc;padding:2mm"><img src="${p.photo}" style="width:100%;height:70mm;object-fit:contain;display:block"><div style="font-size:9pt;margin-top:1.5mm"><b>${esc(fmtDateTime(p.t))}</b>${p.note ? ' · ' + esc(p.note) : ''}</div></div>`).join('')}</div></div>` }); }
-  if (!pages.length) return;
+    pages.push({ w: 210, h: 297, html: `<div class="sheet" style="width:210mm;height:297mm;padding:12mm;box-sizing:border-box;display:block;font-family:Archivo,Arial,sans-serif;color:#111"><div style="display:flex;justify-content:space-between;border-bottom:2px solid #111;padding-bottom:3mm;margin-bottom:5mm;font-size:9pt"><div><b>${esc(s.nom || 'BHVA')}</b> · traçabilité simplifiée · du ${esc(fmtDate(PhotoOpts.from))} au ${esc(fmtDate(PhotoOpts.to))}</div><div>page ${pages.length + 1} / ${Math.ceil(list.length / per)}</div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:5mm">${chunk.map((p, j) => `<div style="border:1px solid #ccc;padding:2mm"><img src="${fulls[i + j]}" style="width:100%;height:70mm;object-fit:contain;display:block"><div style="font-size:9pt;margin-top:1.5mm"><b>${esc(fmtDateTime(p.t))}</b>${p.note ? ' · ' + esc(p.note) : ''}</div></div>`).join('')}</div></div>` }); }
   try { if (canDirectPrint()) await directPrint(pages, null, `tracabilite-photos-${todayStr()}.pdf`); else { const blob = await pagesToPdf(pages, { scale: 2 }); await deliverPdf(blob, `tracabilite-photos-${todayStr()}.pdf`); } } catch (e) { toast('Échec : ' + e.message, 'err', 6000); }
 }
 
