@@ -553,6 +553,22 @@ body.is-home .home-btn,body.gestion-mode .home-btn{display:none}
 .fld label,.field label{font-size:.9rem}
 textarea.input{min-height:90px}
 .pill{font-size:.8rem;padding:4px 10px}
+
+.temp-list{display:flex;flex-direction:column;gap:8px}
+.temp-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 16px;border:2px solid var(--line);border-radius:14px;background:var(--surface);flex-wrap:wrap}
+.temp-row.ok{border-color:#9bd4a8;background:#f2fbf4}.temp-row.out{border-color:#e0616f;background:#fff1f2}
+.temp-name{display:flex;flex-direction:column;gap:2px;font-size:1.1rem}.temp-name .muted{font-size:.85rem}
+.temp-ctl{display:flex;align-items:center;gap:8px}
+.temp-btn{width:60px;height:60px;font-size:1.8rem;border-radius:14px;padding:0}
+.temp-in{width:110px;height:60px;text-align:center;font-size:1.6rem;font-weight:800}
+.temp-unit{font-size:1.1rem;font-weight:700;color:var(--fg-2)}
+.photo-drop{display:flex;gap:12px;flex-wrap:wrap}
+.photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.photo-grid.big{grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}
+.photo-cell{position:relative;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
+.photo-cell img{width:100%;aspect-ratio:1;object-fit:cover;display:block;cursor:pointer}
+.photo-cell .icon-btn{position:absolute;top:6px;right:6px;background:rgba(255,255,255,.92)}
+.photo-cap{font-size:.8rem;padding:6px 8px;color:var(--fg-2)}
 </style>
 
 </head>
@@ -580,6 +596,7 @@ textarea.input{min-height:90px}
 <div id="print-root" aria-hidden="true"></div>
 <input type="file" id="file-import" accept="application/json,.json" hidden>
 <input type="file" id="file-photo" accept="image/*" capture="environment" hidden>
+<input type="file" id="file-trace" accept="image/*" multiple hidden>
 <input type="file" id="file-logo" accept="image/*" hidden>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -654,7 +671,7 @@ const LS = {
 };
 
 /* ===================== store (db capability, or local file) ===================== */
-const COLLS = ['produits', 'reglages', 'receptions', 'fabrications', 'journal', 'commandes', 'dlc', 'factures', 'stock', 'mouvements', 'recettes', 'notifications'];
+const COLLS = ['produits', 'reglages', 'receptions', 'fabrications', 'journal', 'commandes', 'dlc', 'factures', 'stock', 'mouvements', 'recettes', 'notifications', 'equipements', 'temperatures', 'tracephotos'];
 const Store = {
   mode: 'local', db: null, cache: {}, ready: false, _subs: new Set(), _raf: 0, _unsubs: [], errors: 0,
   fb: null,
@@ -794,6 +811,7 @@ const isArtifact = () => !!(window.claude && typeof window.claude.use === 'funct
 
 /* ===================== icons ===================== */
 const I = {
+  thermo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.76V5a2 2 0 0 0-4 0v9.76a4 4 0 1 0 4 0z"/></svg>',
   chart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 6-7"/></svg>',
   home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8v9a2 2 0 0 1-2 2h-4v-7H9v7H5a2 2 0 0 1-2-2z"/></svg>',
   tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>',
@@ -827,6 +845,7 @@ const ROUTES = [
   { id: 'accueil', label: 'Ma journée', icon: 'home' },
   { id: 'prix', label: 'Affichage des prix', icon: 'tag' },
   { id: 'evolution', label: 'Évolution des prix', icon: 'chart' },
+  { id: 'temperatures', label: 'Températures', icon: 'thermo' },
   { id: 'trace', label: 'Traçabilité', icon: 'shield' },
   { id: 'dlc', label: 'Calendrier DLC', icon: 'clock' },
   { id: 'commandes', label: 'Commandes', icon: 'bag' },
@@ -990,6 +1009,7 @@ Views.accueil = function () {
   const factDue = b.factures || 0; const stockLow = b.stocks || 0;
   const lots = Store.all('fabrications').filter(f => f.date === t).length;
   const since7 = new Date(Date.now() - 7 * 86400000).toISOString();
+  const tempDone = ['matin', 'soir'].filter(m => Store.get('temperatures', `r-${t}-${m}`)).length;
   const priceChanges = Store.all('produits').flatMap(p => (p.historique || []).filter(h => h.t >= since7).map(h => ({ p, h }))).sort((a, b) => b.h.t.localeCompare(a.h.t));
   const recs = Store.all('receptions').filter(r => r.date >= addDays(t, -2)).sort((a, b2) => b2.date.localeCompare(a.date)).slice(0, 5);
   const journal = Store.all('journal').sort((a, b2) => b2.date.localeCompare(a.date)).slice(0, 2).flatMap(d => (d.entries || []).slice(-4).reverse().map(e => Object.assign({ date: d.date }, e))).slice(0, 5);
@@ -1009,10 +1029,11 @@ Views.accueil = function () {
     { id: 'trace', t: 'Traçabilité', n: lots, k: `lot${lots > 1 ? 's' : ''} fabriqué${lots > 1 ? 's' : ''} aujourd'hui`, alert: false },
     { id: 'commandes', t: 'Commandes', n: cmds.length, k: 'à préparer ou remettre', alert: cmds.length > 0 },
     { id: 'dlc', t: 'Dates DLC / DDM', n: dlcs.length, k: 'à traiter', alert: dlcs.length > 0 },
-    { id: 'evolution', t: 'Évolution des prix', n: priceChanges.length, k: 'changements sur 7 jours', alert: false },
-    { id: 'stocks', t: 'Stocks et pertes', n: stockLow, k: 'sous le seuil', alert: stockLow > 0 }
+    { id: 'temperatures', t: 'Températures', n: tempDone, k: tempDone === 2 ? 'matin et soir relevés' : tempDone === 1 ? 'relevé sur 2 fait' : 'relevé sur 2 fait aujourd\'hui', alert: tempDone < (Number(nowTime().slice(0, 2)) >= 14 ? 2 : 1) }
   ];
   const small = [
+    { id: 'evolution', t: 'Évolution des prix', n: priceChanges.length, k: 'sur 7 jours', alert: false },
+    { id: 'stocks', t: 'Stocks', n: stockLow, k: stockLow ? 'sous le seuil' : '', alert: stockLow > 0 },
     { id: 'factures', t: 'Factures & BL', n: factDue, k: factDue ? 'échues' : '', alert: factDue > 0 },
     { id: 'recettes', t: 'Recettes', n: Store.count('recettes'), k: 'fiches', alert: false },
     { id: 'gestion', t: 'Prix BHVA', n: '', k: 'application téléphone', alert: false },
@@ -1541,9 +1562,9 @@ async function printTraceLabels(mode, btn) {
 
 Views.trace = function () {
   const tab = TraceOpts.tab; const s = Store.settings(); const total = TraceQueue.total();
-  const tabs = [['lots', 'Lots & étiquettes'], ['receptions', 'Réceptions'], ['etiquettes', `Étiquettes 62 mm${total ? ` (${total})` : ''}`], ['registre', 'Registre & historique']];
+  const tabs = [['photos', '📷 Suivi simplifié'], ['lots', 'Lots & étiquettes'], ['receptions', 'Réceptions'], ['etiquettes', `Étiquettes 62 mm${total ? ` (${total})` : ''}`], ['registre', 'Registre & historique']];
   let body = '';
-  if (tab === 'lots') body = traceLotsTab(); else if (tab === 'receptions') body = traceReceptionsTab(); else if (tab === 'etiquettes') body = traceLabelsTab(); else body = traceRegistreTab();
+  if (tab === 'photos') body = tracePhotosTab(); else if (tab === 'lots') body = traceLotsTab(); else if (tab === 'receptions') body = traceReceptionsTab(); else if (tab === 'etiquettes') body = traceLabelsTab(); else body = traceRegistreTab();
   return `
   <div class="page-head"><div><div class="eyebrow">Imprimante Brother · étiquettes ${s.brotherW} × ${s.brotherH} mm</div><h1>Traçabilité</h1><p class="lead">Réceptions, lots fabriqués, étiquettes 62 mm, registre.</p></div>
     <div class="toolbar"><button class="btn btn-xl" data-act="newreception">${I.download} Recevoir une livraison</button><button class="btn btn-xl btn-primary" data-act="newfab">${I.cleaver} Nouvelle étiquette / lot</button></div></div>
@@ -2079,6 +2100,25 @@ const Actions = {
   fbdisconnect: async () => { if (await confirmDialog('Déconnecter cet appareil de la base partagée ? Les données resteront dans la base, cet appareil repassera en mode local.', { danger: true, ok: 'Déconnecter' })) { try { if (window.firebase && firebase.apps.length) await firebase.auth().signOut(); } catch (e) { } LS.del('firebase'); LS.set('fbSkip', true); location.reload(); } },
   fbreconnect: () => { LS.del('fbSkip'); location.reload(); },
   iosshare: () => iosShare(),
+  temphist: el => { TempOpts.hist = el.dataset.v === '1'; render(); },
+  tempmoment: el => { TempOpts.moment = el.dataset.v; TempOpts.vals = {}; render(); },
+  tempopen: el => { TempOpts.date = el.dataset.d; TempOpts.moment = el.dataset.m; TempOpts.vals = {}; TempOpts.hist = false; render(); },
+  tempstep: el => { const e = Store.get('equipements', el.dataset.id); const date = TempOpts.date || todayStr(), moment = TempOpts.moment || momentAuto(); const rel = Store.get('temperatures', releveId(date, moment)); let v = TempOpts.vals[el.dataset.id]; if (v == null) v = rel && rel.vals[el.dataset.id] != null ? rel.vals[el.dataset.id] : tempDefault(e); v = Math.round((Number(v) + Number(el.dataset.v) * 0.5) * 10) / 10; TempOpts.vals[el.dataset.id] = v; render(); },
+  tempsave: () => saveTemps(),
+  tempcsv: () => tempExportCsv(),
+  tempprint: () => tempPrint(),
+  equipmanage: () => openEquipManager(),
+  equipseed: async () => { await seedEquip(); render(); },
+  equipedit: el => openEquipForm(el.dataset.id),
+  equipsave: async el => { const f = $('#equip-form'); if (!f || !f.reportValidity()) return; const o = formData(f); const id = el.dataset.id || 'eq-' + uid(); const prev = Store.get('equipements', id) || { ordre: equipList().length, actif: true }; await Store.set('equipements', id, Object.assign({}, prev, { nom: o.nom.trim(), min: num(o.min), max: num(o.max) })); openEquipManager(); render(); },
+  equipdel: async el => { if (await confirmDialog('Retirer cet équipement de la liste ? Les relevés passés restent conservés.', { danger: true, ok: 'Retirer' })) { await Store.patch('equipements', el.dataset.id, { actif: false }); openEquipManager(); render(); } },
+  tphotocapture: () => { const i = $('#file-trace'); i.setAttribute('capture', 'environment'); i.click(); },
+  tphotopick: () => { const i = $('#file-trace'); i.removeAttribute('capture'); i.click(); },
+  tphotoremove: el => { _tracePending.splice(Number(el.dataset.i), 1); render(); },
+  tphotosave: () => tracePhotoSave(),
+  tphotoview: el => { const p = Store.get('tracephotos', el.dataset.id); if (p) openModal({ title: fmtDateTime(p.t) + (p.note ? ' · ' + p.note : ''), body: `<img src="${esc(p.photo)}" style="width:100%;border-radius:8px">`, footer: `<button class="btn" data-close="1">Fermer</button>` }); },
+  tphotodel: async el => { if (await confirmDialog('Supprimer définitivement cette photo de traçabilité ?', { danger: true, ok: 'Supprimer' })) { await Store.remove('tracephotos', el.dataset.id); render(); } },
+  tphotoprint: () => tracePhotoPrint(),
   msgnew: () => { openModal({ title: 'Message au comptoir', narrow: true, body: `<p class="help">Il s'affiche en grand sur l'iPad avec la sonnerie, jusqu'à « OK, vu ».</p><textarea class="input input-lg" id="msg-text" rows="3" placeholder="Ex. : N'oubliez pas les œufs" autofocus></textarea><div class="chips" style="margin-top:10px">${['N\'oubliez pas les œufs', 'Appelez-moi', 'Rangez la chambre froide', 'Livraison en route', 'Préparez la commande'].map(t => `<button type="button" class="chip" data-act="msgpreset" data-v="${esc(t)}">${esc(t)}</button>`).join('')}</div>`, footer: `<button class="btn" data-close="1">Annuler</button><button class="btn btn-primary btn-lg" data-act="msgsend">${I.bell} Envoyer</button>` }); },
   msgpreset: el => { const t = $('#msg-text'); if (t) { t.value = el.dataset.v; t.focus(); } },
   msgsend: async () => { const t = (($('#msg-text') || {}).value || '').trim(); if (!t) { toast('Écrivez un message', 'err'); return; } closeModal(); await notify({ type: 'message', texte: t, nom: t }); toast('Message envoyé au comptoir', 'ok'); },
@@ -2098,6 +2138,11 @@ const Inputs = {
   marge: el => { PriceOpts.marge = el.checked; LS.set('marge', el.checked); render(); },
   setson: async el => { if (!el.checked) return; const prev = Store.settings(); await Store.set('reglages', 'boucherie', Object.assign({}, prev, { sonAlerte: el.value })); Alarm.preview(el.value); },
   evosearch: el => { EvoOpts.q = el.value; render(); },
+  tempval: el => { const v = num(el.value); TempOpts.vals[el.dataset.id] = v == null ? '' : v; render(); },
+  tempdate: el => { TempOpts.date = el.value || todayStr(); TempOpts.vals = {}; render(); },
+  tphotofrom: el => { PhotoOpts.from = el.value; render(); },
+  tphototo: el => { PhotoOpts.to = el.value; render(); },
+  tphotoq: el => { PhotoOpts.q = el.value; render(); },
   price: async el => { const v = num(el.value); const p = Store.get('produits', el.dataset.id); if (!p) return; if (v == null || v < 0) { el.value = p.price == null ? '' : p.price.toFixed(2).replace('.', ','); toast('Prix non valide — l\'ancien prix est conservé', 'err'); return; } el.value = v.toFixed(2).replace('.', ','); if (p.price === v) return; const now = new Date().toISOString(); const hist = (p.historique || []).slice(-400).concat([{ t: now, de: p.price, a: v }]); await Store.patch('produits', el.dataset.id, { price: v, maj: now, majPrix: now, historique: hist }); toast(`${p.name} : ${fmtMoney(v)}${UNIT_LABEL[p.unit] || ''} enregistré`, 'ok', 1800); await notify({ type: 'prix', produitId: p.id, nom: p.name, de: p.price, a: v }); },
   stmin: async el => { const v = num(el.value); const p = Store.get('produits', el.dataset.id); const s = Store.get('stock', el.dataset.id) || { qte: null, unite: p && p.unit === 'kg' ? 'kg' : 'piece' }; if (s.min === v) return; await Store.set('stock', el.dataset.id, Object.assign({}, s, { min: v, nom: p ? p.name : '' })); },
   recespece: el => { const box = $('#orig-fields'); if (box) box.innerHTML = originFields(el.value, { ne: 'France', eleve: 'France', abattu: 'France' }); },
@@ -2129,6 +2174,7 @@ document.addEventListener('change', e => {
 /* pendant qu'on tape dans une case « prix », l'écran ne se redessine pas (sinon la case se remettait à l'ancienne valeur) */
 document.addEventListener('focusout', e => { if (e.target && e.target.matches && e.target.matches('input[data-commit="change"]')) setTimeout(() => { if (_renderPending) { _renderPending = false; render(); } }, 50); });
 $('#file-photo').addEventListener('change', e => onPhotoPicked(e.target.files[0]));
+$('#file-trace').addEventListener('change', e => { tracePhotoAdd(e.target.files); e.target.value = ''; });
 $('#file-import').addEventListener('change', async e => {
   const file = e.target.files[0]; if (!file) return;
   try { const o = JSON.parse(await file.text()); const replace = await confirmDialog(`Restaurer « ${file.name} » ? Les données existantes portant le même identifiant seront remplacées.`, { ok: 'Restaurer' }); if (!replace) return; await Store.importAll(o, false); toast('Sauvegarde restaurée', 'ok'); render(); }
@@ -2288,6 +2334,110 @@ const Standby = {
     render(); Standby.arm(); Wake.on(); soundHint(); Notif.init();
   } catch (e) { console.error(e); $('#view').innerHTML = `<div class="notice crit">Le site n'a pas pu démarrer : ${esc(e.message)}</div>`; }
 })();
+
+/* ===================== TEMPÉRATURES DES ÉQUIPEMENTS ===================== */
+const EQUIP_INIT = [['Comptoir tour 1', -2, 4], ['Comptoir tour 2', -2, 4], ['Comptoir zone 1', -2, 4], ['Comptoir zone 2', -2, 4], ['Chambre froide', 0, 4], ['Congélateur', -30, -18]];
+const TempOpts = { date: null, moment: null, vals: {}, hist: false };
+function equipList() { return Store.all('equipements').filter(e => e.actif !== false).sort((a, b) => (a.ordre ?? 0) - (b.ordre ?? 0) || a.nom.localeCompare(b.nom, 'fr')); }
+async function seedEquip() { for (let i = 0; i < EQUIP_INIT.length; i++) { const [nom, min, max] = EQUIP_INIT[i]; await Store.set('equipements', 'eq-' + uid(), { nom, min, max, ordre: i, actif: true }); } }
+function momentAuto() { return Number(nowTime().slice(0, 2)) < 14 ? 'matin' : 'soir'; }
+function releveId(date, moment) { return `r-${date}-${moment}`; }
+function tempDefault(e) { return e.min != null && e.max != null ? Math.round((e.min + e.max) / 2) : 2; }
+Views.temperatures = function () {
+  const eqs = equipList(); const t = todayStr(); const date = TempOpts.date || t; const moment = TempOpts.moment || momentAuto();
+  const rel = Store.get('temperatures', releveId(date, moment));
+  const vals = Object.assign({}, rel ? rel.vals : {}, TempOpts.vals);
+  const todayDone = ['matin', 'soir'].map(m => !!Store.get('temperatures', releveId(t, m)));
+  const row = e => { const v = vals[e.id]; const has = v != null && v !== ''; const out = has && ((e.min != null && v < e.min) || (e.max != null && v > e.max));
+    return `<div class="temp-row ${out ? 'out' : has ? 'ok' : ''}"><div class="temp-name"><strong>${esc(e.nom)}</strong><span class="muted">${e.min != null || e.max != null ? `attendu ${e.min ?? '…'} à ${e.max ?? '…'} °C` : ''}${out ? ' · <b style="color:#b42318">HORS PLAGE</b>' : ''}</span></div>
+      <div class="temp-ctl"><button class="btn temp-btn" data-act="tempstep" data-id="${e.id}" data-v="-1">−</button><input class="input temp-in num" type="text" inputmode="decimal" enterkeyhint="done" data-on="tempval" data-commit="change" data-id="${e.id}" id="temp-${e.id}" value="${has ? String(v).replace('.', ',') : ''}" placeholder="— °C"><button class="btn temp-btn" data-act="tempstep" data-id="${e.id}" data-v="1">+</button><span class="temp-unit">°C</span></div></div>`; };
+  const hist = () => { const days = {}; Store.all('temperatures').forEach(r => { (days[r.date] = days[r.date] || {})[r.moment] = r; }); const list = Object.keys(days).sort().reverse().slice(0, 60);
+    return `<div class="card"><div class="card-head"><h2>Historique</h2><div class="row"><button class="btn btn-sm" data-act="tempcsv">${I.download} CSV</button><button class="btn btn-sm" data-act="tempprint">${I.print} Imprimer</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Relevé</th>${eqs.map(e => `<th class="right">${esc(e.nom)}</th>`).join('')}<th></th></tr></thead><tbody>${list.flatMap(d => ['matin', 'soir'].filter(m => days[d][m]).map(m => { const r = days[d][m]; return `<tr><td>${esc(fmtDate(d))}</td><td>${m === 'matin' ? 'Matin' : 'Soir'} ${esc((r.heure || ''))}</td>${eqs.map(e => { const v = r.vals[e.id]; const out = v != null && ((e.min != null && v < e.min) || (e.max != null && v > e.max)); return `<td class="right num" style="${out ? 'color:#b42318;font-weight:700' : ''}">${v == null ? '—' : String(v).replace('.', ',') + ' °C'}</td>`; }).join('')}<td><button class="btn btn-sm" data-act="tempopen" data-d="${d}" data-m="${m}">Ouvrir</button></td></tr>`; })).join('') || `<tr><td colspan="${eqs.length + 3}" class="muted">Aucun relevé.</td></tr>`}</tbody></table></div></div>`; };
+  return `
+  <div class="page-head"><div><div class="eyebrow">Autocontrôle · HACCP</div><h1>Températures</h1><p class="lead">Matin et soir : une valeur par équipement, puis Valider. Tout est conservé.</p></div>
+    <div class="toolbar"><div class="seg"><button class="${!TempOpts.hist ? 'on' : ''}" data-act="temphist" data-v="0">Relevé</button><button class="${TempOpts.hist ? 'on' : ''}" data-act="temphist" data-v="1">Historique</button></div><button class="btn btn-xl" data-act="equipmanage">${I.gear} Équipements</button></div></div>
+  ${TempOpts.hist ? hist() : `
+  <div class="card card-pad stack">
+    <div class="row" style="gap:12px;align-items:center;flex-wrap:wrap"><div class="seg"><button class="${moment === 'matin' ? 'on' : ''}" data-act="tempmoment" data-v="matin">☀️ Matin ${todayDone[0] && date === t ? '✓' : ''}</button><button class="${moment === 'soir' ? 'on' : ''}" data-act="tempmoment" data-v="soir">🌙 Soir ${todayDone[1] && date === t ? '✓' : ''}</button></div><input class="input" type="date" value="${date}" data-on="tempdate" style="max-width:190px">${rel ? `<span class="pill pill-ok">Validé à ${esc(rel.heure || '')}${rel.par ? ' · ' + esc(rel.par) : ''}</span>` : `<span class="pill pill-warn">À renseigner</span>`}</div>
+    ${eqs.length ? `<div class="temp-list">${eqs.map(row).join('')}</div>` : `<div class="empty"><strong>Aucun équipement.</strong><button class="btn btn-primary" data-act="equipseed">Ajouter les équipements de départ</button></div>`}
+    <div class="row" style="gap:10px"><input class="input" id="temp-par" placeholder="Relevé par (initiales)" value="${esc(rel ? rel.par || '' : LS.get('tempPar', ''))}" style="max-width:220px"><button class="btn btn-xl btn-primary fill" data-act="tempsave" ${eqs.length ? '' : 'disabled'}>${I.check} Valider le relevé ${moment === 'matin' ? 'du matin' : 'du soir'}</button></div>
+  </div>`}`;
+};
+async function saveTemps() {
+  const eqs = equipList(); const t = todayStr(); const date = TempOpts.date || t; const moment = TempOpts.moment || momentAuto();
+  const prev = Store.get('temperatures', releveId(date, moment)); const vals = Object.assign({}, prev ? prev.vals : {}, TempOpts.vals);
+  const missing = eqs.filter(e => vals[e.id] == null || vals[e.id] === '');
+  if (missing.length && !(await confirmDialog(`${missing.length} équipement${missing.length > 1 ? 's' : ''} sans température (${missing.map(e => e.nom).join(', ')}). Valider quand même ?`, { ok: 'Valider' }))) return;
+  const out = eqs.filter(e => { const v = vals[e.id]; return v != null && v !== '' && ((e.min != null && v < e.min) || (e.max != null && v > e.max)); });
+  const par = (($('#temp-par') || {}).value || '').trim(); LS.set('tempPar', par);
+  await Store.set('temperatures', releveId(date, moment), { date, moment, heure: nowTime(), vals, par, t: new Date().toISOString(), horsPlage: out.map(e => e.nom) });
+  TempOpts.vals = {};
+  if (out.length) toast(`Relevé enregistré · ATTENTION : ${out.map(e => e.nom).join(', ')} hors plage`, 'err', 8000); else toast('Relevé enregistré', 'ok');
+  render();
+}
+function openEquipManager() {
+  const eqs = equipList();
+  openModal({ title: 'Équipements (frigos, vitrines, congélateurs)', body: `<p class="help">Un équipement par ligne : nom, température attendue de … à … °C. Les relevés passés sont conservés même si vous en retirez un.</p><div class="list" id="equip-list">${eqs.map(e => `<div class="list-item"><div class="main"><div class="title">${esc(e.nom)}</div><div class="sub">${e.min ?? '…'} à ${e.max ?? '…'} °C</div></div><button class="icon-btn" data-act="equipedit" data-id="${e.id}" aria-label="Modifier">${I.pencil}</button><button class="icon-btn" data-act="equipdel" data-id="${e.id}" aria-label="Retirer">${I.trash}</button></div>`).join('') || '<div class="empty small"><span>Aucun équipement.</span></div>'}</div>`, footer: `<button class="btn" data-close="1">Fermer</button><button class="btn btn-primary" data-act="equipedit" data-id="">${I.plus} Ajouter un équipement</button>` });
+}
+function openEquipForm(id) {
+  const e = id ? Store.get('equipements', id) : { nom: '', min: 0, max: 4 };
+  openModal({ title: id ? 'Modifier l\'équipement' : 'Nouvel équipement', narrow: true, body: `<form id="equip-form" class="stack"><div class="field"><label>Nom</label><input class="input input-lg" name="nom" value="${esc(e.nom)}" required placeholder="Ex. : Vitrine volaille"></div><div class="form-grid"><div class="field"><label>Mini (°C)</label><input class="input" name="min" type="number" step="0.5" value="${e.min ?? ''}"></div><div class="field"><label>Maxi (°C)</label><input class="input" name="max" type="number" step="0.5" value="${e.max ?? ''}"></div></div><p class="help">Frigo / vitrine : 0 à 4 °C en général. Congélateur : −30 à −18 °C.</p></form>`, footer: `<button class="btn" data-act="equipmanage">Retour</button><button class="btn btn-primary" data-act="equipsave" data-id="${id || ''}">Enregistrer</button>` });
+  $('#equip-form').addEventListener('submit', ev => { ev.preventDefault(); Actions.equipsave({ dataset: { id: id || '' } }); });
+}
+async function tempExportCsv() {
+  const eqs = equipList(); const rows = [['Date', 'Relevé', 'Heure', 'Par'].concat(eqs.map(e => e.nom))];
+  Store.all('temperatures').sort((a, b) => (a.date + a.moment).localeCompare(b.date + b.moment)).forEach(r => rows.push([fmtDate(r.date), r.moment, r.heure || '', r.par || ''].concat(eqs.map(e => r.vals[e.id] == null ? '' : String(r.vals[e.id]).replace('.', ',')))));
+  await deliverText('﻿' + rows.map(r => r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(';')).join('\n'), `temperatures-${todayStr()}.csv`);
+}
+async function tempPrint() {
+  const eqs = equipList(); const s = Store.settings(); const from = addDays(todayStr(), -31);
+  const list = Store.all('temperatures').filter(r => r.date >= from).sort((a, b) => (b.date + b.moment).localeCompare(a.date + a.moment));
+  const html = `<div class="sheet" style="width:297mm;height:210mm;padding:12mm;box-sizing:border-box;display:block;font-family:Archivo,Arial,sans-serif;color:#111;font-size:9.5pt">
+    <div style="display:flex;justify-content:space-between;border-bottom:2px solid #111;padding-bottom:3mm;margin-bottom:4mm"><div><div style="font-size:8pt;letter-spacing:.1em;text-transform:uppercase;color:#555">${esc(s.nom || 'BHVA')} · relevés de températures · 31 derniers jours</div><div style="font-size:16pt;font-weight:800">Registre des températures</div></div><div style="text-align:right;color:#555">Imprimé le ${esc(fmtDate(todayStr(), 'long'))}</div></div>
+    <table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:1px solid #111"><th style="text-align:left;padding:1.5mm">Date</th><th style="text-align:left;padding:1.5mm">Relevé</th>${eqs.map(e => `<th style="text-align:right;padding:1.5mm">${esc(e.nom)}<br><span style="font-weight:400;color:#555">${e.min ?? '…'}/${e.max ?? '…'} °C</span></th>`).join('')}<th style="text-align:left;padding:1.5mm">Par</th></tr></thead><tbody>${list.map(r => `<tr style="border-bottom:1px solid #ddd"><td style="padding:1.2mm 1.5mm">${esc(fmtDate(r.date))}</td><td style="padding:1.2mm 1.5mm">${r.moment === 'matin' ? 'Matin' : 'Soir'} ${esc(r.heure || '')}</td>${eqs.map(e => { const v = r.vals[e.id]; const out = v != null && ((e.min != null && v < e.min) || (e.max != null && v > e.max)); return `<td style="text-align:right;padding:1.2mm 1.5mm;${out ? 'color:#b42318;font-weight:700' : ''}">${v == null ? '—' : String(v).replace('.', ',')}</td>`; }).join('')}<td style="padding:1.2mm 1.5mm">${esc(r.par || '')}</td></tr>`).join('')}</tbody></table></div>`;
+  const pages = [{ html, w: 297, h: 210 }];
+  try { if (canDirectPrint()) await directPrint(pages, null, `temperatures-${todayStr()}.pdf`); else { const blob = await pagesToPdf(pages, { scale: 2.2 }); await deliverPdf(blob, `temperatures-${todayStr()}.pdf`); } } catch (e) { toast('Échec : ' + e.message, 'err', 6000); }
+}
+
+/* ===================== TRAÇABILITÉ SIMPLIFIÉE (photos d'étiquettes) ===================== */
+const PhotoOpts = { from: addDays(todayStr(), -30), to: todayStr(), q: '' };
+let _tracePending = [];
+function tracePhotosTab() {
+  const list = Store.all('tracephotos').filter(p => p.date >= PhotoOpts.from && p.date <= PhotoOpts.to && (!PhotoOpts.q || normStr(p.note || '').includes(normStr(PhotoOpts.q)))).sort((a, b) => (b.t || '').localeCompare(a.t || ''));
+  const total = Store.count('tracephotos'); const oldest = Store.all('tracephotos').map(p => p.date).sort()[0];
+  return `
+  <div class="card card-pad stack">
+    <div class="spread"><div><h2 style="margin:0">Suivi de traçabilité simplifié</h2><p class="help">Prenez en photo l'étiquette de chaque produit reçu (origine, lot, DLC). Tout est horodaté et conservé — ${total} photo${total > 1 ? 's' : ''}${oldest ? ` depuis le ${esc(fmtDate(oldest))}` : ''}.</p></div></div>
+    <div class="photo-drop"><button class="btn btn-xl btn-primary" data-act="tphotocapture">${I.camera} Prendre en photo une étiquette</button><button class="btn btn-xl" data-act="tphotopick">${I.upload} Choisir des photos</button></div>
+    <div id="tphoto-pending" class="photo-grid">${_tracePending.map((p, i) => `<div class="photo-cell"><img src="${p.url}" alt=""><button class="icon-btn" data-act="tphotoremove" data-i="${i}">${I.x}</button></div>`).join('')}</div>
+    ${_tracePending.length ? `<div class="row"><input class="input input-lg fill" id="tphoto-note" placeholder="Note facultative : fournisseur, produit…"><button class="btn btn-xl btn-primary" data-act="tphotosave">${I.check} Enregistrer ${_tracePending.length} photo${_tracePending.length > 1 ? 's' : ''}</button></div>` : ''}
+  </div>
+  <div class="card card-pad stack" style="margin-top:14px">
+    <div class="spread" style="flex-wrap:wrap;gap:10px"><h2 style="margin:0">Historique de traçabilité</h2><div class="row" style="gap:8px;flex-wrap:wrap"><input class="input" type="date" value="${PhotoOpts.from}" data-on="tphotofrom" style="max-width:170px"><span>→</span><input class="input" type="date" value="${PhotoOpts.to}" data-on="tphototo" style="max-width:170px"><input class="input" placeholder="Note…" value="${esc(PhotoOpts.q)}" data-on="tphotoq" style="max-width:160px"><button class="btn btn-sm" data-act="tphotoprint" ${list.length ? '' : 'disabled'}>${I.print} Imprimer la période</button></div></div>
+    ${list.length ? `<div class="photo-grid big">${list.slice(0, 120).map(p => `<div class="photo-cell"><img src="${esc(p.photo)}" alt="" data-act="tphotoview" data-id="${p.id}"><div class="photo-cap">${esc(fmtDateTime(p.t))}${p.note ? ' · ' + esc(p.note) : ''}</div><button class="icon-btn" data-act="tphotodel" data-id="${p.id}">${I.trash}</button></div>`).join('')}</div>${list.length > 120 ? `<p class="help">${list.length - 120} autres photos : réduisez la période.</p>` : ''}` : '<div class="empty"><span>Aucune photo sur cette période.</span></div>'}
+  </div>`;
+}
+async function tracePhotoAdd(files) {
+  for (const f of Array.from(files || [])) { try { const small = await resizeImage(f, 1100, 0.7); _tracePending.push({ blob: small, url: URL.createObjectURL(small) }); } catch (e) { toast('Photo illisible', 'err'); } }
+  render();
+}
+async function tracePhotoSave() {
+  const note = (($('#tphoto-note') || {}).value || '').trim(); if (!_tracePending.length) return;
+  showBusy('Enregistrement…');
+  try {
+    for (const p of _tracePending) { const data = await new Promise(res => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.readAsDataURL(p.blob); }); await Store.set('tracephotos', 'tp-' + uid(), { t: new Date().toISOString(), date: todayStr(), note, photo: data }); }
+    toast(`${_tracePending.length} photo${_tracePending.length > 1 ? 's' : ''} enregistrée${_tracePending.length > 1 ? 's' : ''}`, 'ok'); _tracePending = [];
+    await logJournal({ type: 'trace', detail: 'Photos de traçabilité enregistrées' });
+  } catch (e) { toast('Échec : ' + (e.message || e), 'err', 6000); } finally { hideBusy(); render(); }
+}
+async function tracePhotoPrint() {
+  const list = Store.all('tracephotos').filter(p => p.date >= PhotoOpts.from && p.date <= PhotoOpts.to).sort((a, b) => (a.t || '').localeCompare(b.t || '')); const s = Store.settings();
+  const per = 6; const pages = [];
+  for (let i = 0; i < list.length; i += per) { const chunk = list.slice(i, i + per);
+    pages.push({ w: 210, h: 297, html: `<div class="sheet" style="width:210mm;height:297mm;padding:12mm;box-sizing:border-box;display:block;font-family:Archivo,Arial,sans-serif;color:#111"><div style="display:flex;justify-content:space-between;border-bottom:2px solid #111;padding-bottom:3mm;margin-bottom:5mm;font-size:9pt"><div><b>${esc(s.nom || 'BHVA')}</b> · traçabilité simplifiée · du ${esc(fmtDate(PhotoOpts.from))} au ${esc(fmtDate(PhotoOpts.to))}</div><div>page ${pages.length + 1} / ${Math.ceil(list.length / per)}</div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:5mm">${chunk.map(p => `<div style="border:1px solid #ccc;padding:2mm"><img src="${p.photo}" style="width:100%;height:70mm;object-fit:contain;display:block"><div style="font-size:9pt;margin-top:1.5mm"><b>${esc(fmtDateTime(p.t))}</b>${p.note ? ' · ' + esc(p.note) : ''}</div></div>`).join('')}</div></div>` }); }
+  if (!pages.length) return;
+  try { if (canDirectPrint()) await directPrint(pages, null, `tracabilite-photos-${todayStr()}.pdf`); else { const blob = await pagesToPdf(pages, { scale: 2 }); await deliverPdf(blob, `tracabilite-photos-${todayStr()}.pdf`); } } catch (e) { toast('Échec : ' + e.message, 'err', 6000); }
+}
 
 </script>
 </body>
