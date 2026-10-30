@@ -845,8 +845,8 @@ async function notify(entry) {
   const all = Store.all('notifications').sort((a, b) => (a.t || '').localeCompare(b.t || ''));
   for (const old of all.slice(0, Math.max(0, all.length - 120))) { try { await Store.remove('notifications', old.id); } catch (e) { } }
   await Store.set('notifications', 'n-' + uid(), Object.assign({ t: new Date().toISOString(), lu: false, de_: Store.deviceId() }, entry));
-  const txt = entry.type === 'prix' ? `${entry.nom} : ${fmtMoney(entry.de)} → ${fmtMoney(entry.a)}` : `${entry.nom}`;
-  sendPush(entry.type === 'prix' ? 'Prix modifié' : 'Nouveau produit', txt);
+  const txt = entry.type === 'prix' ? `${entry.nom} : ${fmtMoney(entry.de)} → ${fmtMoney(entry.a)}` : entry.type === 'message' ? entry.texte : `${entry.nom}`;
+  sendPush(entry.type === 'prix' ? 'Prix modifié' : entry.type === 'message' ? 'Message du responsable' : 'Nouveau produit', txt);
 }
 /* notification push (téléphones / iPad verrouillés) via ntfy.sh — gratuit, sans compte : l'appli ntfy abonnée au sujet reçoit une vraie notification avec son */
 function pushTopic() { const s = Store.settings(); return String(s.ntfyTopic || (typeof NTFY_TOPIC !== 'undefined' ? NTFY_TOPIC : '') || '').trim(); }
@@ -1246,7 +1246,7 @@ Views.prix = function () {
   <div class="page-head"><div><div class="eyebrow">HP : feuilles A4 · Brother : rouleau 62 mm</div><h1>Affichage des prix</h1><p class="lead">Touchez un produit : il part dans la file. Viande et fruits & légumes → feuille A4 (HP), épicerie → rouleau Brother.</p></div>
     <div class="toolbar"><button class="btn" data-act="preview" ${total ? '' : 'disabled'}>${I.eye} Aperçu</button></div>
   </div>
-  ${(() => { const un = unreadNotifs().filter(n => n.type === 'prix'); if (!un.length) return ''; const n0 = un[0]; return `<div class="notif-banner">${I.bell}<span class="fill">${un.length === 1 ? `Prix modifié : <strong>${esc(n0.nom)}</strong> ${esc(fmtMoney(n0.de))} → <strong>${esc(fmtMoney(n0.a))}</strong>` : `${un.length} prix modifiés`} · ${esc(fmtDateTime(n0.t))}</span><button class="btn btn-sm" data-act="notifs">Voir</button><button class="btn btn-sm" data-act="notifsread">OK, vu</button></div>`; })()}
+  ${(() => { const un = unreadNotifs().filter(n => n.type === 'prix' || n.type === 'message'); if (!un.length) return ''; const n0 = un[0]; return `<div class="notif-banner">${I.bell}<span class="fill">${un.length === 1 ? (n0.type === 'message' ? `Message : <strong>${esc(n0.texte)}</strong>` : `Prix modifié : <strong>${esc(n0.nom)}</strong> ${esc(fmtMoney(n0.de))} → <strong>${esc(fmtMoney(n0.a))}</strong>`) : `${un.length} nouvelles alertes`} · ${esc(fmtDateTime(n0.t))}</span><button class="btn btn-sm" data-act="notifs">Voir</button><button class="btn btn-sm" data-act="notifsread">OK, vu</button></div>`; })()}
   <div class="grid-2">
     <div>
       <div class="card card-pad prices-controls">
@@ -1420,7 +1420,7 @@ Views.gestion = function () {
   const list = prods.filter(p => (cat === 'tous' || p.cat === cat) && (!nq || normStr(p.name).includes(nq) || normStr(p.code || '').includes(nq))).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
   const un = unreadNotifs().length;
   return `
-  <div class="gest-top"><div><div class="eyebrow">Synchronisé avec le comptoir</div><h1>Prix BHVA</h1></div><button class="btn btn-primary" data-act="newp">${I.plus} Nouveau</button></div>
+  <div class="gest-top"><div><div class="eyebrow">Synchronisé avec le comptoir</div><h1>Prix BHVA</h1></div><div class="row" style="gap:8px"><button class="btn btn-dark" data-act="msgnew" aria-label="Message au comptoir">${I.bell} Message</button><button class="btn btn-primary" data-act="newp">${I.plus} Nouveau</button></div></div>
   <div class="gest-head">
     <div class="search">${I.search}<input class="input input-lg" id="prod-search" placeholder="Rechercher un produit…" value="${esc(ProdOpts.q)}" data-on="psearch" autocomplete="off"></div>
     <div class="chips">${cats.map(c => `<button class="chip ${cat === c ? 'on' : ''}" data-act="pcat" data-v="${c}">${CAT_LABEL[c]}</button>`).join('')}<button class="chip ${cat === 'tous' ? 'on' : ''}" data-act="pcat" data-v="tous">Tous</button></div>
@@ -2080,6 +2080,9 @@ const Actions = {
   fbdisconnect: async () => { if (await confirmDialog('Déconnecter cet appareil de la base partagée ? Les données resteront dans la base, cet appareil repassera en mode local.', { danger: true, ok: 'Déconnecter' })) { try { if (window.firebase && firebase.apps.length) await firebase.auth().signOut(); } catch (e) { } LS.del('firebase'); LS.set('fbSkip', true); location.reload(); } },
   fbreconnect: () => { LS.del('fbSkip'); location.reload(); },
   iosshare: () => iosShare(),
+  msgnew: () => { openModal({ title: 'Message au comptoir', narrow: true, body: `<p class="help">Il s'affiche en grand sur l'iPad avec la sonnerie, jusqu'à « OK, vu ».</p><textarea class="input input-lg" id="msg-text" rows="3" placeholder="Ex. : N'oubliez pas les œufs" autofocus></textarea><div class="chips" style="margin-top:10px">${['N\'oubliez pas les œufs', 'Appelez-moi', 'Rangez la chambre froide', 'Livraison en route', 'Préparez la commande'].map(t => `<button type="button" class="chip" data-act="msgpreset" data-v="${esc(t)}">${esc(t)}</button>`).join('')}</div>`, footer: `<button class="btn" data-close="1">Annuler</button><button class="btn btn-primary btn-lg" data-act="msgsend">${I.bell} Envoyer</button>` }); },
+  msgpreset: el => { const t = $('#msg-text'); if (t) { t.value = el.dataset.v; t.focus(); } },
+  msgsend: async () => { const t = (($('#msg-text') || {}).value || '').trim(); if (!t) { toast('Écrivez un message', 'err'); return; } closeModal(); await notify({ type: 'message', texte: t, nom: t }); toast('Message envoyé au comptoir', 'ok'); },
   sonplay: el => Alarm.preview(el.dataset.v),
   notifask: () => Notif.ask(),
   pushtest: async () => { const ok = await sendPush('Test BHVA', 'Les notifications fonctionnent ✔︎'); toast(ok ? 'Notification envoyée — regardez l\'appli ntfy' : 'Envoi impossible (connexion internet ?)', ok ? 'ok' : 'err', 5000); },
@@ -2225,12 +2228,13 @@ const Alarm = {
   start(n, test = false) {
     if (window.FORCE_GESTION) return;
     Standby.hide && Standby.el && Standby.hide();
-    const txt = n.type === 'prix' ? `${esc(n.nom)}<br><span class="alarm-price">${esc(fmtMoney(n.de))} → ${esc(fmtMoney(n.a))}</span>` : `Nouveau produit : ${esc(n.nom)}`;
+    const txt = n.type === 'prix' ? `${esc(n.nom)}<br><span class="alarm-price">${esc(fmtMoney(n.de))} → ${esc(fmtMoney(n.a))}</span>` : n.type === 'message' ? `${esc(n.texte)}` : `Nouveau produit : ${esc(n.nom)}`;
+    const titre = n.type === 'prix' ? 'PRIX MODIFIÉ' : n.type === 'message' ? 'MESSAGE' : 'NOUVEAU PRODUIT';
     if (!this.el) { this.el = document.createElement('div'); this.el.className = 'alarm'; document.body.appendChild(this.el); }
     const nb = unreadNotifs().length;
-    this.el.innerHTML = `<div class="alarm-ico">${I.bell}</div><div class="alarm-title">${n.type === 'prix' ? 'PRIX MODIFIÉ' : 'NOUVEAU PRODUIT'}</div><div class="alarm-txt">${txt}</div><div class="alarm-sub">${esc(fmtDateTime(n.t))}${nb > 1 ? ` · ${nb} changements à voir` : ''}${test ? ' · test' : ''}</div><button class="btn alarm-ok" data-act="alarmok">OK, vu — arrêter la sonnerie</button>${this.unlocked ? '' : '<div class="alarm-sub" style="margin-top:8px">Pas de son ? Touchez l\'écran une fois au démarrage de l\'application pour activer la sonnerie.</div>'}`;
+    this.el.innerHTML = `<div class="alarm-ico">${I.bell}</div><div class="alarm-title">${titre}</div><div class="alarm-txt">${txt}</div><div class="alarm-sub">${esc(fmtDateTime(n.t))}${nb > 1 ? ` · ${nb} changements à voir` : ''}${test ? ' · test' : ''}</div><button class="btn alarm-ok" data-act="alarmok">OK, vu — arrêter la sonnerie</button>${this.unlocked ? '' : '<div class="alarm-sub" style="margin-top:8px">Pas de son ? Touchez l\'écran une fois au démarrage de l\'application pour activer la sonnerie.</div>'}`;
     this.ring();
-    Notif.show(n.type === 'prix' ? 'PRIX MODIFIÉ' : 'NOUVEAU PRODUIT', n.type === 'prix' ? `${n.nom} : ${fmtMoney(n.de)} → ${fmtMoney(n.a)}` : n.nom, 'bhva-alerte');
+    Notif.show(titre, n.type === 'prix' ? `${n.nom} : ${fmtMoney(n.de)} → ${fmtMoney(n.a)}` : n.type === 'message' ? n.texte : n.nom, 'bhva-alerte');
     this.el.onpointerdown = () => { if (!this.unlocked) this.unlock(); if (this.audio && this.audio.paused) this.ring(); };
     try { navigator.vibrate && navigator.vibrate([300, 200, 300]); } catch (e) { }
   },
