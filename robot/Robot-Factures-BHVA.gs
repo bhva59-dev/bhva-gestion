@@ -5,7 +5,7 @@
  * même quand le PC et l'iPad sont éteints. Aucune IA, aucun abonnement.
  *
  * Toutes les 5 heures :
- *   1. regarde UNIQUEMENT les mails de factures connus (liste MAILS_FACTURES ci-dessous :
+ *   1. regarde UNIQUEMENT les mails de factures connus reçus depuis le 31/10/2026 18h45 (liste MAILS_FACTURES ci-dessous :
  *      bon expéditeur + bon objet + bon nom de PDF) ;
  *   2. copie le PDF de la facture dans l'appli BHVA (rubrique Factures) ;
  *   3. ne crée jamais deux fois la même facture (empreinte du fichier) ;
@@ -16,7 +16,7 @@
 
 const CONFIG = {
   HEURES: 5,                 // une vérification toutes les 5 heures
-  JOURS: 60,                 // on regarde les mails de factures des 60 derniers jours pas encore traités
+  DEPUIS: new Date('2026-10-31T17:45:00Z'), // départ : seules les factures reçues après le 31/10/2026 18h45 (le stock repart de l'inventaire)
   LIBELLE: 'BHVA-importee',
   PROJET: 'bhva-gestion',
   CLE_API: 'AIzaSyAuEx9IUK0JdWXJeLgFj86IB0-KCdwaf4U', // clé publique de l'appli (déjà visible dans le site)
@@ -97,7 +97,7 @@ function importer_() {
   try {
     const lib = libelle_();
     const expediteurs = Array.from(new Set(MAILS_FACTURES.map(r => r.q))).map(q => 'from:' + q).join(' OR ');
-    const q = 'has:attachment filename:pdf newer_than:' + CONFIG.JOURS + 'd -label:' + CONFIG.LIBELLE + ' (' + expediteurs + ')';
+    const q = 'has:attachment filename:pdf after:' + Math.floor(CONFIG.DEPUIS.getTime() / 1000) + ' -label:' + CONFIG.LIBELLE + ' (' + expediteurs + ')';
     const fils = [];
     for (let debut = 0; debut < 1000; debut += 100) { const lot = GmailApp.search(q, debut, 100); fils.push.apply(fils, lot); if (lot.length < 100) break; }
     fils.forEach(fil => {
@@ -119,6 +119,7 @@ function traiterMessage_(msg) {
   const de = msg.getFrom();
   const email = ((de.match(/<([^>]+)>/) || [null, de])[1] || '').trim().toLowerCase();
   const sujet = msg.getSubject() || '';
+  if (msg.getDate() < CONFIG.DEPUIS) return 0;            // reçu avant le départ : on ne prend pas
   const regle = regleFacture(email, sujet);
   if (!regle) return 0;                                   // pas un mail de facture : on ne prend rien
   const pdfs = msg.getAttachments({ includeInlineImages: false }).filter(a => pdfFacture(regle, a.getName()));

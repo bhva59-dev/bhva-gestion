@@ -3173,8 +3173,10 @@ const FactLecture = {
   }
 };
 /* Une fiche venue d'un mail n'est gardée que si le mail est un « mail de facture » reconnu (liste MAILS_FACTURES) */
+const FACT_DEPUIS = '2026-10-31T17:45:00Z';   // départ : les factures d'avant ont servi de test ; le stock repart de l'inventaire
 function factAutorisee(f) {
   if (!f || f.source !== 'mail' || !f.mail) return true;            // PDF ajouté à la main : on le garde (contrôle du contenu ensuite)
+  if (!f.mail.date || f.mail.date < FACT_DEPUIS) return false;     // reçue avant le départ
   const r = regleFacture(f.mail.email, f.mail.sujet);
   return !!r && pdfFacture(r, f.pdf && f.pdf.nom);
 }
@@ -3184,7 +3186,7 @@ async function nettoyerFactures() {
   try {
     const hors = Store.all('factures').filter(f => !factAutorisee(f));
     for (const f of hors) { await FactPdf.remove(f); await Store.remove('factures', f.id); }
-    if (hors.length) toast(`${hors.length} document${hors.length > 1 ? 's' : ''} retiré${hors.length > 1 ? 's' : ''} : pas un mail de facture`);
+    if (hors.length) toast(`${hors.length} document${hors.length > 1 ? 's' : ''} retiré${hors.length > 1 ? 's' : ''} de la liste`);
   } finally { _nettoyage = false; }
 }
 async function lireFacture(f) {
@@ -3326,7 +3328,7 @@ Views.factures = function () {
     <div class="toolbar"><button class="btn btn-xl" data-act="factpdf">📄 Ajouter des PDF</button><button class="btn btn-xl" data-act="newfact" data-type="bl">${I.camera} Bon de livraison</button><button class="btn btn-xl btn-primary" data-act="newfact" data-type="facture">${I.camera} Facture</button></div></div>
   <div class="stats"><div class="stat"><span class="v num">${esc(fmtMoney(totalMois))}</span><span class="k">factures du mois (TTC)</span></div><div class="stat ${aPayer ? 'alert' : ''}"><span class="v num">${esc(fmtMoney(aPayer))}</span><span class="k">reste à payer</span></div><div class="stat ${echues ? 'alert' : ''}"><span class="v num">${echues}</span><span class="k">factures échues</span></div><div class="stat ${aVerif ? 'alert' : ''}" data-act="facttype" data-v="verif" style="cursor:pointer"><span class="v num">${aVerif}</span><span class="k">à vérifier</span></div></div>
   <div class="card"><div class="card-head" style="flex-wrap:wrap;gap:10px"><div class="seg"><button class="${FactOpts.type === 'tous' ? 'on' : ''}" data-act="facttype" data-v="tous">Tout</button><button class="${FactOpts.type === 'facture' ? 'on' : ''}" data-act="facttype" data-v="facture">Factures</button><button class="${FactOpts.type === 'avoir' ? 'on' : ''}" data-act="facttype" data-v="avoir">Avoirs</button><button class="${FactOpts.type === 'bl' ? 'on' : ''}" data-act="facttype" data-v="bl">BL</button><button class="${FactOpts.type === 'verif' ? 'on' : ''}" data-act="facttype" data-v="verif">À vérifier</button></div><div class="seg"><button class="${FactOpts.statut === 'tous' ? 'on' : ''}" data-act="factstatut" data-v="tous">Tous statuts</button><button class="${FactOpts.statut === 'a_payer' ? 'on' : ''}" data-act="factstatut" data-v="a_payer">À payer</button><button class="${FactOpts.statut === 'payee' ? 'on' : ''}" data-act="factstatut" data-v="payee">Payées</button></div><input class="input" type="search" placeholder="Rechercher fournisseur, n°…" value="${esc(FactOpts.q || '')}" data-on="factsearch" style="max-width:260px"></div>
-  ${list.length ? `<div class="list">${list.map(item).join('')}</div>` : `<div class="empty"><strong>Aucun document ici.</strong><span>Les factures reçues par mail apparaîtront ici automatiquement.</span></div>`}</div>`;
+  ${list.length ? `<div class="list">${list.map(item).join('')}</div>` : `<div class="empty"><strong>Aucune facture pour l'instant.</strong><span>Les factures reçues par mail à partir du 31 octobre 2026 arriveront ici toutes seules.</span></div>`}</div>`;
 };
 Object.assign(Actions, {
   factpdf: () => $('#file-pdf').click(),
