@@ -2701,7 +2701,7 @@ const FactEngine = (() => {
   };
   function generique(pages, texte) {
     const r = {};
-    for (const re of GEN.numero) { const v = chercher(texte, re); if (v) { r.numero = v; break; } }
+    for (const re of GEN.numero) { const v = chercher(texte, re); if (v && /\d/.test(v)) { r.numero = v; break; } }
     for (const re of GEN.date) { const v = dateIso(chercher(texte, re)); if (v) { r.date = v; break; } }
     if (!r.date) { const m = texte.match(RE_DATE); if (m) r.date = dateIso(m[0]); }
     for (const re of GEN.echeance) { const v = dateIso(chercher(texte, re)); if (v) { r.echeance = v; break; } }
@@ -2868,13 +2868,17 @@ async function lireFacture(f) {
   await dedoublonner(Object.assign({}, f, patch));
 }
 function cleFacture(f) {
-  const n = String(f.numero || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^0+/, '');
+  const brut = String(f.numero || '').trim();
+  if (brut.length < 3 || !/\d/.test(brut)) return '';   // numéro douteux : jamais de suppression
+  const n = brut.toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^0+/, '');
   const four = String(f.gabarit || f.fournisseur || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   return n && four ? four + '|' + (f.type === 'avoir' ? 'A' : '') + n : '';
 }
 async function dedoublonner(f) {
   const k = cleFacture(f); if (!k) return;
-  const autres = Store.all('factures').filter(x => x.id !== f.id && cleFacture(x) === k);
+  // doublon seulement si : même fournisseur, même numéro ET même montant TTC (sinon on ne touche à rien)
+  const memeMontant = (a, b) => num(a.ttc) != null && num(b.ttc) != null && Math.abs(num(a.ttc) - num(b.ttc)) < 0.02;
+  const autres = Store.all('factures').filter(x => x.id !== f.id && cleFacture(x) === k && memeMontant(x, f));
   if (!autres.length) return;
   const rang = x => x.source === 'mail' ? 0 : x.source === 'scan' ? 1 : 2;
   const tous = [f, ...autres].sort((a, b) => rang(a) - rang(b) || String(a.cree || '').localeCompare(String(b.cree || '')));
