@@ -53,7 +53,8 @@ const FOURNISSEURS = {
   'iabako.com': 'iabako',
   'ldc.fr': 'LDC (Lionor)',
   'matanza.be': 'Matanza',
-  'ameloot.org': 'Ameloot'
+  'ameloot.org': 'Ameloot',
+  'sudfresh@orange.fr': 'Sud Fresh'
 };
 
 /* ============ À lancer une fois ============ */
@@ -144,7 +145,7 @@ function traiterMessage_(msg) {
 
 function fournisseur_(email, de) {
   const dom = (email.split('@')[1] || '');
-  for (const d in FOURNISSEURS) if (dom === d || dom.endsWith('.' + d)) return FOURNISSEURS[d];
+  for (const d in FOURNISSEURS) if (dom === d || dom.endsWith('.' + d) || email.endsWith(d)) return FOURNISSEURS[d];
   const nom = de.replace(/<[^>]*>/, '').replace(/"/g, '').trim();
   return nom || dom;
 }

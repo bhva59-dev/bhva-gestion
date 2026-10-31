@@ -2755,7 +2755,7 @@ const FactEngine = (() => {
     if (/EXTRAIT DE COMPTE|RELEV[ÉE] DE (?:COMPTE|FACTURES)|SITUATION DE (?:VOTRE )?COMPTE|REKENINGUITTREKSEL|GRANDS? LIVRES?|RELEV[ÉE]S? D'IDENTIT[ÉE] BANCAIRE|Confirmation du jour/i.test(haut)) return 'releve';
     if (/^\s*(?:\d+\s*(?:[èe]me|e|ère)\s+)?(?:RELANCE|RAPPEL|MISE EN DEMEURE|AANMANING|HERINNERING)\b/im.test(haut)) return 'relance';
     if (/\b(?:rappel|relance|mise en demeure)\b/i.test(sujet) && !RE_FICHIER_FACTURE.test(nom)) return 'relance';
-    if (/^\s*(?:DEVIS|BON DE COMMANDE|PRO ?FORMA)\b/im.test(haut)) return 'commande';
+    if (/^\s*(?:DEVIS|BON DE COMMANDE|PRO ?FORMA|BON DE PRISE EN CHARGE)\b/im.test(haut)) return 'commande';
     return 'facture';
   }
   const NATURE_LIBELLE = { autre: 'pas une facture', bl: 'bon de livraison', tarif: 'liste de prix', releve: 'relevé de compte', relance: 'relance / rappel', commande: 'devis ou commande' };
@@ -2805,7 +2805,7 @@ if (typeof module !== 'undefined') module.exports = FactEngine;
    où lire le numéro, la date, l'échéance, le total HT, la TVA (taux et montants), le TTC et les lignes.
    Quand on améliore un gabarit, on augmente GABARITS_VERSION : l'appli relit alors toute seule
    les factures déjà importées (sauf celles corrigées à la main). */
-const GABARITS_VERSION = 4;
+const GABARITS_VERSION = 5;
 const GABARITS = (() => {
   const M = FactEngine.montant, MS = FactEngine.montants, D = FactEngine.dateIso, cols = FactEngine.cols;
   const TAUX = [2.1, 5.5, 6, 10, 20, 21, 0];
@@ -2949,7 +2949,7 @@ const GABARITS = (() => {
       numero: /N[°º] Fact\s+(\d+)/, date: /^Date\s+(\d{2}\/\d{2}\/\d{2})\s+N[°º] Fact/m, echeance: /NET le\s+(\d{2}\/\d{2}\/\d{2})/,
       ht: /TOT HT\s+([\d ]*\d,\d{2})/, tvaMontant: /TOT TVA\s+([\d ]*\d,\d{2})/, ttc: /%\s{2,}[\d ]*\d,\d{2}\s{2,}([\d ]*\d,\d{2})\s*EUR/,
       tvaDetail: (p, t) => [...t.matchAll(/(\d[\d ]*,\d{2})\s+\d\s{2,}(\d+,\d{2})%\s{2,}(\d[\d ]*,\d{2})/g)].map(m => ({ base: M(m[1]), taux: M(m[2]), montant: M(m[3]) })),
-      lignes: (pages) => lignesPar(pages, /^(\d{4})\s{2,}(\d{6})\s{2,}(.+?)\s{2,}(\d{13})\s{2,}(-?\d+)\s+(-?\d+,\d{3})\s{2,}([KUP])\s{2,}(\d+,\d{3})\s*[#*]?\s{2,}(-?\d[\d ]*,\d{2})/, (m) => ({ ref: m[2], ean: m[4], designation: m[3].trim(), qte: m[7] === 'K' ? M(m[6]) : +m[5], unite: m[7] === 'K' ? 'kg' : 'pièce', colis: +m[5], pu: M(m[8]), montant: M(m[9]) }))
+      lignes: (pages) => lignesPar(pages, /^(\d{4})\s{2,}(\d{6})\s{2,}(.+?)\s{2,}(\d{13})\s+(-?\d+)\s+(-?\d+,\d{3})\s{2,}([KUP])\s{2,}(\d+,\d{3})\s*[#*]?\s{2,}(-?\d[\d ]*,\d{2})/, (m) => ({ ref: m[2], ean: m[4], designation: m[3].trim(), qte: m[7] === 'K' ? M(m[6]) : +m[5], unite: m[7] === 'K' ? 'kg' : 'pièce', colis: +m[5], pu: M(m[8]), montant: M(m[9]) }))
     },
 
     /* ---------- Matanza (Belgique, viande) ---------- */
@@ -2958,7 +2958,7 @@ const GABARITS = (() => {
       numero: /N[°º] document:\s+(FASN-\d+)/, date: /Date de facture:\s+(\d{2}-\d{2}-\d{4})/, echeance: /Date d'expiration:\s+(\d{2}-\d{2}-\d{4})/,
       ht: /Base totale de TVA:\s*(-?[\d.]*\d,\d{2})/, tvaMontant: /TVA totale:\s*(-?[\d.]*\d,\d{2})/, ttc: /Total [àa] payer \[EUR\]\s*:\s*(-?[\d.]*\d,\d{2})/, htMarchandise: /Biens et services nets:\s*(-?[\d.]*\d,\d{2})/,
       tvaDetail: (p, t) => { const par = {}; for (const m of t.matchAll(/^(\d+[.,]\d)%\s{2,}(-?[\d.]*\d,\d{2})\s{2,}(-?[\d.]*\d,\d{2})$/gm)) { const k = M(m[1]); const o = par[k] || (par[k] = { taux: k, base: 0, montant: 0 }); o.base = r2(o.base + M(m[2])); o.montant = r2(o.montant + M(m[3])); } return Object.values(par); },
-      lignes: (pages) => lignesPar(pages, /^(\d\.\d{3})\s{2,}(.+?)\s{2,}(-?[\d.]*\d,\d{2})\s{2,}(-?[\d.]*\d,\d{2})(?:\s{2,}(-?[\d.]*\d,\d{2}))?\s{2,}(\d+,\d{3})\/(\w+)\s{2,}(\d+)%\s{2,}(-?[\d.]*\d,\d{2})$/, (m) => ({ ref: m[1], designation: m[2].trim(), qte: /kg/i.test(m[7]) ? M(m[4]) : M(m[3]), unite: /kg/i.test(m[7]) ? 'kg' : 'pièce', colis: M(m[3]), pu: M(m[6]), montant: M(m[9]) }))
+      lignes: (pages) => lignesPar(pages, /^(\d+\.\d{3})\s{2,}(.+?)\s{2,}(-?[\d.]*\d,\d{2})(?:\s{2,}(-?[\d.]*\d,\d{2}))?(?:\s{2,}(-?[\d.]*\d,\d{2}))?\s{2,}(\d+,\d{3})\/(\w+)\s{2,}(\d+)%\s{2,}(-?[\d.]*\d,\d{2})$/, (m) => ({ ref: m[1], designation: m[2].trim(), qte: /kg/i.test(m[7]) && m[4] ? M(m[4]) : M(m[3]), unite: /kg/i.test(m[7]) ? 'kg' : 'pièce', colis: M(m[3]), pu: M(m[6]), montant: M(m[9]) }))
     },
 
     /* ---------- Omer Ameloot & Zonen (Belgique, viande) ---------- */
@@ -2966,9 +2966,18 @@ const GABARITS = (() => {
       nom: 'Ameloot', email: /ameloot\.org$/i, texte: /Ameloot/i,
       numero: /^\d{2}\/\d{2}\/\d{4}\s{2,}\d+\s{2,}(FACT-\d+)/m, date: /^(\d{2}\/\d{2}\/\d{4})\s{2,}\d+\s{2,}FACT-\d+/m,
       echeance: /^(\d{2}\/\d{2}\/\d{4})\s{2,}€\s*-?[\d.]*\d,\d{2}\s*$/m, ttc: /^\d{2}\/\d{2}\/\d{4}\s{2,}€\s*(-?[\d.]*\d,\d{2})\s*$/m,
+      htMarchandise: (p, t) => { const ht = M((t.match(/Totaux\s{2,}€\s*(-?[\d.]*\d,\d{2})/) || [])[1]); const tx = M((t.match(/€\s*(-?[\d.]*\d,\d{2})\s{2,}Totaux/) || [])[1]); return ht != null ? r2(ht - (tx || 0)) : null; },
       ht: /Totaux\s{2,}€\s*(-?[\d.]*\d,\d{2})/, tvaMontant: /Totaux\s{2,}€\s*-?[\d.]*\d,\d{2}\s{2,}€\s*(-?[\d.]*\d,\d{2})/,
       tvaDetail: (p, t) => [...t.matchAll(/^(\d+,\d{2})\s{2,}(-?[\d.]*\d,\d{2})\s{2,}(-?[\d.]*\d,\d{2})$/gm)].map(m => ({ taux: M(m[1]), base: M(m[2]), montant: M(m[3]) })),
       lignes: (pages) => lignesPar(pages, /^(.+?)\s{2,}(-?[\d.]*\d(?:,\d{1,3})?)\s*(kg|st|pc|pce)\s{2,}(\d+,\d{3})\s{2,}(-?[\d.]*\d,\d{2})\s{2,}\d+$/, (m) => ({ ref: '', designation: m[1].trim(), qte: M(m[2]), unite: m[3] === 'kg' ? 'kg' : 'pièce', pu: M(m[4]), montant: M(m[5]) }))
+    },
+
+    /* ---------- Sud Fresh (MIN de Lomme, fruits et légumes) ---------- */
+    sudfresh: {
+      nom: 'Sud Fresh', email: /sudfresh@orange\.fr$/i, texte: /SUD FRESH/,
+      numero: /^\d{3,6}\s{2,}\d{2}\/\d{2}\/\d{4}\s{2,}(\d{4,7})\b/m, date: /^\d{3,6}\s{2,}(\d{2}\/\d{2}\/\d{4})\s{2,}\d{4,7}\b/m, echeance: /ECHEANCE AU\s+(\d{2}\/\d{2}\/\d{4})/,
+      ht: { ligne: /TOTAL HT/ }, tvaMontant: { ligne: /TOTAL TVA/ }, ttc: { ligne: /NET A PAYER/ }, htMarchandise: /^\d+\s{2,}TOTAL HT\s+([\d.]+)/m,
+      lignes: (pages) => lignesPar(pages, /^(\d+\.\d{2})\s+(.+?)\s{2,}.*?(-?\d+(?:\.\d{1,3})?)\s([KPUC])\s+(\d+\.\d{2,3})\s{2,}(-?\d+\.\d{2})\s{2,}\d(?:\s+\w)?$/, (m) => ({ ref: '', designation: m[2].trim(), qte: M(m[3]), unite: m[4] === 'K' ? 'kg' : 'pièce', colis: M(m[1]), pu: M(m[5]), montant: M(m[6]) }))
     },
 
     /* ---------- Fournisseurs hors marchandise ---------- */
