@@ -578,6 +578,14 @@ textarea.input{min-height:90px}
 .alarm button.alarm-play{background:#067647!important;color:#fff!important;border-color:#067647!important;font-size:1.6rem;padding:22px 32px;min-height:84px;border-radius:18px;width:min(92vw,520px);margin-top:6px}
 .alarm button.alarm-play.playing{background:#0b8f57!important}
 .gest-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:6px}.gest-actions .btn{padding:0 8px;min-height:48px}
+/* factures v2 */
+.fact-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 18px;background:var(--bg-2,#f4f6fb);border-radius:14px;padding:14px 16px}
+.fact-grid>div{display:flex;flex-direction:column;gap:2px;min-width:0}.fact-grid .k{font-size:.78rem;color:var(--fg-3,#667);text-transform:uppercase;letter-spacing:.06em}.fact-grid b{font-size:1.05rem;overflow-wrap:anywhere}
+@media (max-width:700px){.fact-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.card-sub{display:flex;flex-direction:column;gap:8px}
+.fact-ico{display:grid;place-items:center;font-size:1.6rem;cursor:pointer;color:var(--fg-3)}
+.pdf-view{display:flex;flex-direction:column;align-items:center;gap:12px;max-height:72vh;overflow:auto;background:#e9ecf2;border-radius:12px;padding:12px}
+.pdf-page{background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.15);border-radius:4px;max-width:100%}
 </style>
 
 </head>
@@ -1852,7 +1860,7 @@ function openFactForm(id, type) {
   const recentF = Array.from(new Set(Store.all('factures').map(x => x.fournisseur).concat(Store.all('receptions').map(x => x.fournisseur)).filter(Boolean))).slice(0, 40);
   const canPhoto = !!Caps.assets || !isArtifact();
   const body = `<form id="fact-form" class="stack"><div class="form-grid">
-    ${fld('Type', sel('type', [['facture', 'Facture'], ['bl', 'Bon de livraison']], f.type, 'data-on="facttypef"'))}
+    ${fld('Type', sel('type', [['facture', 'Facture'], ['avoir', 'Avoir'], ['bl', 'Bon de livraison']], f.type, 'data-on="facttypef"'))}
     ${fld('Fournisseur', inp('fournisseur', f.fournisseur, 'required list="dl-f2" autocomplete="off"') + `<datalist id="dl-f2">${recentF.map(x => `<option value="${esc(x)}">`).join('')}</datalist>`)}
     ${fld('Numéro', inp('numero', f.numero))}${fld('Date', inp('date', f.date, 'type="date" required'))}
     ${fld('Montant HT (€)', inp('ht', f.ht, 'type="number" step="0.01" min="0" inputmode="decimal" data-on="factcalc"'))}${fld('TVA (%)', inp('tva', f.tva ?? 5.5, 'type="number" step="0.1" min="0" inputmode="decimal" data-on="factcalc"'))}
@@ -1886,7 +1894,7 @@ async function saveFactForm(id) {
   }
   const prev = id ? Store.get('factures', id) : null;
   let ttc = num(o.ttc); const ht = num(o.ht), tva = num(o.tva); if (ttc == null && ht != null) ttc = Math.round(ht * (1 + (tva || 0) / 100) * 100) / 100;
-  try { await Store.set('factures', id || ('i-' + uid()), Object.assign({}, prev || { cree: new Date().toISOString() }, { type: o.type, fournisseur: o.fournisseur.trim(), numero: o.numero.trim(), date: o.date, echeance: o.echeance, ht, tva, ttc, statut: o.type === 'facture' ? o.statut : 'na', note: o.note.trim(), photo })); closeModal(); toast('Document enregistré', 'ok'); } catch (e) { }
+  try { await Store.set('factures', id || ('i-' + uid()), Object.assign({}, prev || { cree: new Date().toISOString() }, Object.assign({ type: o.type, fournisseur: o.fournisseur.trim(), numero: o.numero.trim(), date: o.date, echeance: o.echeance, ht, tva, ttc, statut: o.type === 'facture' ? o.statut : 'na', note: o.note.trim(), photo }, prev && prev.pdf ? { corrige: true, lu: 'ok' } : {}))); closeModal(); toast('Document enregistré', 'ok'); } catch (e) { }
 }
 
 /* ===================== stocks ===================== */
@@ -2557,6 +2565,429 @@ function playVocal(id, btn) {
   _vocPlayer.onended = () => { if (btn) { btn.classList.remove('playing'); btn.innerHTML = `▶ Réécouter`; } };
   _vocPlayer.play().catch(() => toast('Lecture impossible', 'err'));
 }
+/* ===================== Lecture des factures : moteur commun (appli + robot de test) =====================
+   Aucune IA : on lit le texte du PDF (pdf.js), on le range en lignes, puis on applique le gabarit du fournisseur.
+   Un gabarit dit où se trouvent le numéro, la date, le total HT, la TVA, le TTC et comment lire les lignes. */
+const FactEngine = (() => {
+  /* ---------- nombres et dates ---------- */
+  function montant(s) {
+    if (s == null) return null;
+    let t = String(s).replace(/[€\s  ]/g, '').replace(/EUR$/i, '');
+    let neg = false;
+    if (/^-/.test(t) || /-$/.test(t) || /^\(.*\)$/.test(t)) { neg = true; t = t.replace(/[-()]/g, ''); }
+    if (!/^\d[\d.,]*$/.test(t) || /[.,]$/.test(t)) return null;
+    const nc = (t.match(/,/g) || []).length, nd = (t.match(/\./g) || []).length;
+    if (nc && nd) { if (t.lastIndexOf(',') > t.lastIndexOf('.')) t = t.replace(/\./g, '').replace(',', '.'); else t = t.replace(/,/g, ''); }
+    else if (nc) t = nc === 1 ? t.replace(',', '.') : t.replace(/,/g, '');
+    else if (nd > 1) t = t.replace(/\./g, '');
+    const v = Number(t);
+    return isFinite(v) ? (neg ? -v : v) : null;
+  }
+  const RE_MONTANT = /-?\(?\d{1,3}(?:[   .,]\d{3})*(?:[.,]\d{1,4})\)?-?|-?\d+(?:[.,]\d{1,4})/g;
+  function montants(texte) { return (String(texte || '').match(RE_MONTANT) || []).map(montant).filter(v => v != null); }
+  const MOIS = { janv: 1, janvier: 1, fevr: 2, fevrier: 2, févr: 2, février: 2, mars: 3, avr: 4, avril: 4, mai: 5, juin: 6, juil: 7, juillet: 7, aout: 8, août: 8, sept: 9, septembre: 9, oct: 10, octobre: 10, nov: 11, novembre: 11, dec: 12, decembre: 12, déc: 12, décembre: 12 };
+  function dateIso(s) {
+    if (!s) return '';
+    s = String(s).trim();
+    let m = s.match(/(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/);
+    if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+    m = s.match(/(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})/);
+    if (m) { let y = m[3]; if (y.length === 2) y = '20' + y; const d = +m[1], mo = +m[2]; if (mo < 1 || mo > 12 || d < 1 || d > 31) return ''; return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`; }
+    m = s.toLowerCase().match(/(\d{1,2})\s+([a-zéû]+)\.?\s+(\d{4})/);
+    if (m && MOIS[m[2]]) return `${m[3]}-${String(MOIS[m[2]]).padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+    return '';
+  }
+  const RE_DATE = /\b\d{1,2}[\/.\-]\d{1,2}[\/.\-](?:\d{4}|\d{2})\b|\b\d{4}-\d{2}-\d{2}\b/;
+  const r2 = v => v == null ? null : Math.round(v * 100) / 100;
+
+  /* ---------- PDF → lignes ---------- */
+  async function lirePdf(pdfjsLib, data) {
+    const doc = await pdfjsLib.getDocument({ data, isEvalSupported: false, disableFontFace: true }).promise;
+    const pages = [];
+    for (let p = 1; p <= doc.numPages; p++) {
+      const page = await doc.getPage(p);
+      const vp = page.getViewport({ scale: 1 });
+      const tc = await page.getTextContent();
+      const items = [];
+      for (const it of tc.items) {
+        if (!it.str || !it.str.trim()) continue;
+        const tr = it.transform; const h = Math.hypot(tr[2], tr[3]) || it.height || 8;
+        if (Math.abs(tr[1]) > Math.abs(tr[0]) * 2) continue; // texte vertical : ignoré
+        items.push({ s: it.str, x: tr[4], y: vp.height - tr[5], w: it.width, h });
+      }
+      pages.push({ n: p, w: vp.width, h: vp.height, lignes: grouper(items) });
+    }
+    try { doc.destroy(); } catch (e) { }
+    return pages;
+  }
+  function grouper(items) {
+    items.sort((A, B) => A.y - B.y || A.x - B.x);
+    const lignes = [];
+    for (const it of items) {
+      const tol = Math.max(1.8, it.h * 0.42);
+      let L = null;
+      for (let i = lignes.length - 1; i >= 0 && i >= lignes.length - 5; i--) if (Math.abs(lignes[i].y - it.y) <= tol) { L = lignes[i]; break; }
+      if (!L) { L = { y: it.y, items: [] }; lignes.push(L); }
+      L.items.push(it);
+    }
+    for (const L of lignes) { L.items.sort((A, B) => A.x - B.x); L.texte = joindre(L.items); L.x = L.items[0].x; }
+    lignes.sort((A, B) => A.y - B.y);
+    return lignes;
+  }
+  function joindre(items) {
+    let out = '', fin = null, h = 8;
+    for (const it of items) {
+      if (fin != null) {
+        const ecart = it.x - fin, cw = Math.max(2, h * 0.5);
+        if (ecart > cw * 2.6) out = out.replace(/ +$/, '') + '   ';
+        else if (ecart > cw * 0.22 && !/ $/.test(out) && !/^ /.test(it.s)) out += ' ';
+      }
+      out += it.s; fin = it.x + it.w; h = it.h;
+    }
+    return out.replace(/\s+$/, '');
+  }
+  const cols = t => String(t).split(/\s{3,}/).map(s => s.trim()).filter(Boolean);
+  function texteDe(pages) { return pages.map(p => p.lignes.map(l => l.texte).join('\n')).join('\n\f\n'); }
+
+  /* ---------- outils de gabarit ---------- */
+  function trouverLigne(pages, re, apres) {
+    for (const p of pages) for (let i = 0; i < p.lignes.length; i++) { if (re.test(p.lignes[i].texte)) { if (!apres || apres--<= 0) return { p, i, l: p.lignes[i] }; } }
+    return null;
+  }
+  // valeur sous un intitulé de colonne (tableaux « Total HT | TVA | Net à payer » avec les montants en dessous)
+  function sousIntitule(pages, reIntitule, opts = {}) {
+    for (const p of pages) for (let i = 0; i < p.lignes.length; i++) {
+      const L = p.lignes[i];
+      const it = L.items.find(x => reIntitule.test(x.s)) || (reIntitule.test(L.texte) ? null : undefined);
+      if (it === undefined) continue;
+      let x0, x1;
+      if (it) { x0 = it.x; x1 = it.x + it.w; }
+      else { // intitulé coupé en plusieurs morceaux : on prend l'emprise de la ligne correspondante
+        const m = L.texte.match(reIntitule); if (!m) continue; const k = L.texte.indexOf(m[0]); let acc = 0; let a = null, b = null;
+        for (const x of L.items) { const s0 = acc, s1 = acc + x.s.length + 1; if (s1 > k && s0 < k + m[0].length) { a = a == null ? x.x : Math.min(a, x.x); b = Math.max(b || 0, x.x + x.w); } acc = s1; }
+        if (a == null) continue; x0 = a; x1 = b;
+      }
+      const marge = opts.marge ?? 18;
+      for (let j = i + 1; j < Math.min(p.lignes.length, i + 1 + (opts.lignes || 3)); j++) {
+        const cand = p.lignes[j].items.filter(x => (x.x <= x1 + marge && x.x + x.w >= x0 - marge) && montant(x.s.trim()) != null);
+        if (cand.length) { cand.sort((A, B) => Math.abs((A.x + A.w / 2) - (x0 + x1) / 2) - Math.abs((B.x + B.w / 2) - (x0 + x1) / 2)); return montant(cand[0].s.trim()); }
+      }
+    }
+    return null;
+  }
+  // dernier montant de la ligne qui contient l'intitulé (ou de la suivante si la ligne n'en a pas)
+  function surLigne(pages, re, opts = {}) {
+    const all = [];
+    for (const p of pages) for (let i = 0; i < p.lignes.length; i++) if (re.test(p.lignes[i].texte)) all.push({ p, i });
+    const pick = opts.premier ? all[0] : all[all.length - 1];
+    if (!pick) return null;
+    const t = pick.p.lignes[pick.i].texte;
+    const m = t.match(re); const reste = opts.avant ? t.slice(0, m.index) : t.slice(m.index + m[0].length);
+    let vals = montants(reste);
+    if (!vals.length && !opts.memeLigne && pick.p.lignes[pick.i + 1]) vals = montants(pick.p.lignes[pick.i + 1].texte);
+    if (!vals.length) return null;
+    return opts.position === 'premier' ? vals[0] : vals[vals.length - 1];
+  }
+  function chercher(texte, re) { const m = texte.match(re); return m ? (m[1] || m[0]).trim() : ''; }
+
+  /* ---------- lecture générique (fournisseur inconnu) ---------- */
+  const GEN = {
+    numero: [/(?:facture|invoice|factuur)\s*(?:n[°ºo]\.?|num(?:[ée]ro)?\.?|no\.?|nr\.?|number|#)\s*:?\s*([A-Z0-9][A-Z0-9\/\-._]{2,})/i, /(?:n[°º]|num[ée]ro)\s*(?:de\s*)?(?:facture|pi[eè]ce)\s*:?\s*([A-Z0-9][A-Z0-9\/\-._]{2,})/i, /\b(?:INV|FA|FAC|F)[\/\-]?\d{2,4}[\/\-]\d{2,6}\b/],
+    date: [/date\s*(?:de\s*)?(?:la\s*)?(?:facture|facturation|d'?[ée]mission|document)?\s*:?\s*(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})/i, /(?:du|le)\s*(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})/i],
+    echeance: [/(?:[ée]ch[ée]ance|date\s*limite|date\s*de\s*paiement|due\s*date|vervaldatum|payable\s*le)\s*:?\s*(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})/i],
+    ttc: /(net\s*[àa]\s*payer|total\s*t\.?t\.?c\.?|montant\s*t\.?t\.?c\.?|total\s*[àa]\s*payer|reste\s*[àa]\s*payer|amount\s*due|total\s*due|te\s*betalen|total\s*incl)/i,
+    ht: /(total\s*h\.?t\.?|montant\s*h\.?t\.?|total\s*hors\s*tax|net\s*h\.?t\.?|base\s*h\.?t\.?|total\s*excl|sub\s*-?total|sous\s*-?total)/i,
+    tva: /(total\s*t\.?v\.?a\.?|montant\s*t\.?v\.?a\.?|total\s*vat|btw\s*bedrag|total\s*tax)/i
+  };
+  function generique(pages, texte) {
+    const r = {};
+    for (const re of GEN.numero) { const v = chercher(texte, re); if (v) { r.numero = v; break; } }
+    for (const re of GEN.date) { const v = dateIso(chercher(texte, re)); if (v) { r.date = v; break; } }
+    if (!r.date) { const m = texte.match(RE_DATE); if (m) r.date = dateIso(m[0]); }
+    for (const re of GEN.echeance) { const v = dateIso(chercher(texte, re)); if (v) { r.echeance = v; break; } }
+    r.ttc = surLigne(pages, GEN.ttc); r.ht = surLigne(pages, GEN.ht); r.tvaMontant = surLigne(pages, GEN.tva);
+    if (r.ttc == null) r.ttc = sousIntitule(pages, GEN.ttc);
+    if (r.ht == null) r.ht = sousIntitule(pages, GEN.ht);
+    if (r.tvaMontant == null) r.tvaMontant = sousIntitule(pages, GEN.tva);
+    return r;
+  }
+
+  /* ---------- application d'un gabarit ---------- */
+  function appliquer(g, pages, texte) {
+    const r = {};
+    const champ = (spec) => {
+      if (!spec) return undefined;
+      if (typeof spec === 'function') return spec(pages, texte, outils);
+      if (spec instanceof RegExp) return chercher(texte, spec);
+      if (spec.re) return chercher(texte, spec.re);
+      if (spec.ligne) return surLigne(pages, spec.ligne, spec);
+      if (spec.sous) return sousIntitule(pages, spec.sous, spec);
+      return undefined;
+    };
+    for (const k of ['numero', 'date', 'echeance']) { const v = champ(g[k]); if (v) r[k] = k === 'numero' ? String(v).trim() : dateIso(v); }
+    for (const k of ['ht', 'tvaMontant', 'ttc']) { const v = champ(g[k]); if (v != null && v !== '') r[k] = typeof v === 'number' ? v : montant(v); }
+    if (g.tvaDetail) r.tvaDetail = g.tvaDetail(pages, texte, outils) || [];
+    if (g.lignes) r.lignes = g.lignes(pages, texte, outils) || [];
+    if (g.type) { const t = g.type(pages, texte, outils); if (t) r.type = t; }
+    return r;
+  }
+  const outils = { montant, montants, dateIso, cols, surLigne, sousIntitule, trouverLigne, chercher, r2, RE_DATE };
+
+  /* ---------- reconnaissance du fournisseur ---------- */
+  function reconnaitre(gabarits, email, texte) {
+    for (const k in gabarits) { const g = gabarits[k]; if (g.email && email && g.email.test(email)) return k; }
+    for (const k in gabarits) { const g = gabarits[k]; if (g.texte && g.texte.test(texte)) return k; }
+    return null;
+  }
+
+  /* ---------- lecture complète ---------- */
+  function lire(gabarits, pages, info = {}) {
+    const texte = texteDe(pages);
+    const vide = texte.replace(/\s/g, '').length < 30;
+    if (vide) return { lu: 'scan', texte: '', note: 'PDF scanné sans texte' };
+    const cle = reconnaitre(gabarits, info.email || '', texte);
+    const g = cle ? gabarits[cle] : null;
+    const base = generique(pages, texte);
+    const spec = g ? appliquer(g, pages, texte) : {};
+    const r = Object.assign({}, base, ...Object.entries(spec).filter(([k, v]) => v != null && v !== '' && !(Array.isArray(v) && !v.length)).map(([k, v]) => ({ [k]: v })));
+    if (g) { r.gabarit = cle; r.fournisseur = g.nom; }
+    // compléter / contrôler les totaux
+    if (r.ht == null && r.ttc != null && r.tvaMontant != null) r.ht = r2(r.ttc - r.tvaMontant);
+    if (r.tvaMontant == null && r.ttc != null && r.ht != null) r.tvaMontant = r2(r.ttc - r.ht);
+    if (r.ttc == null && r.ht != null && r.tvaMontant != null) r.ttc = r2(r.ht + r.tvaMontant);
+    if (r.tvaDetail && r.tvaDetail.length) {
+      const taux = r.tvaDetail.filter(t => t.base).sort((a, b) => b.base - a.base)[0];
+      if (taux) r.tva = taux.taux;
+    } else if (r.ht && r.tvaMontant != null) {
+      const t = r.tvaMontant / r.ht * 100; const conn = [0, 2.1, 5.5, 6, 10, 20, 21, 8, 23].find(x => Math.abs(x - t) < 0.15); r.tva = conn != null ? conn : r2(t);
+    }
+    const ok = r.ttc != null && r.ht != null && r.tvaMontant != null && Math.abs(r.ht + r.tvaMontant - r.ttc) <= 0.06 && !!r.numero && !!r.date;
+    r.lu = ok ? 'ok' : 'a_verifier';
+    if (r.lignes && r.lignes.length && r.ht != null) {
+      const s = r2(r.lignes.reduce((a, l) => a + (l.montant || 0), 0));
+      r.lignesOk = Math.abs(s - r.ht) <= Math.max(0.06, Math.abs(r.ht) * 0.002);
+    }
+    return r;
+  }
+
+  return { montant, montants, dateIso, lirePdf, grouper, texteDe, cols, lire, generique, reconnaitre, outils };
+})();
+if (typeof module !== 'undefined') module.exports = FactEngine;
+/* ===================== Gabarits des fournisseurs =====================
+   Un gabarit par fournisseur : comment le reconnaître, où lire chaque montant.
+   Quand on améliore un gabarit, on augmente GABARITS_VERSION : l'appli relit alors toute seule
+   les factures déjà importées (sauf celles corrigées à la main). */
+const GABARITS_VERSION = 1;
+const GABARITS = {};
+if (typeof module !== 'undefined') module.exports = { GABARITS, GABARITS_VERSION };
+/* ===================== Factures : PDF, lecture automatique, doublons =====================
+   - Les PDF arrivent par le robot Gmail (source « mail ») ou par le bouton « Ajouter des PDF » (source « scan »).
+   - Chaque PDF est rangé dans « factures_pdf » (morceaux), la fiche dans « factures ».
+   - Identifiant = empreinte du fichier : le même fichier ne peut jamais entrer deux fois.
+   - L'appli lit le PDF (pdf.js) et applique le gabarit du fournisseur, puis supprime les doublons
+     (même fournisseur + même numéro : on garde la version reçue par mail). */
+const FACT_PDF = 'factures_pdf', FACT_TXT = 'factures_texte', FACT_MORCEAU = 900000;
+let _pdfjsP = null;
+function chargerPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (_pdfjsP) return _pdfjsP;
+  _pdfjsP = new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = 'lib/pdf.min.js';
+    s.onload = () => { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js'; res(window.pdfjsLib); } catch (e) { rej(e); } };
+    s.onerror = () => { _pdfjsP = null; rej(new Error('Lecteur PDF indisponible')); };
+    document.head.appendChild(s);
+  });
+  return _pdfjsP;
+}
+async function sha256Hex(bytes) { const h = await crypto.subtle.digest('SHA-256', bytes); return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join(''); }
+function b64VersOctets(b64) { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
+function octetsVersB64(u) { let s = ''; const P = 0x8000; for (let i = 0; i < u.length; i += P) s += String.fromCharCode.apply(null, u.subarray(i, i + P)); return btoa(s); }
+const factEnLigne = () => Store.mode === 'firebase' && Store.fb;
+
+const FactPdf = {
+  cache: new Map(),
+  async get(f) {
+    if (this.cache.has(f.id)) return this.cache.get(f.id);
+    if (!factEnLigne()) throw new Error('Base non connectée');
+    const n = (f.pdf && f.pdf.n) || 1;
+    const docs = await Promise.all(Array.from({ length: n }, (_, k) => Store.fb.collection(FACT_PDF).doc(f.id + '_' + k).get()));
+    const b64 = docs.map(d => d.exists ? (d.data().d || '') : '').join('');
+    if (!b64) throw new Error('PDF introuvable');
+    const u = b64VersOctets(b64); this.cache.set(f.id, u); return u;
+  },
+  async put(id, bytes) {
+    const b64 = octetsVersB64(bytes); const n = Math.ceil(b64.length / FACT_MORCEAU) || 1;
+    for (let k = 0; k < n; k++) await Store.fb.collection(FACT_PDF).doc(id + '_' + k).set({ d: b64.slice(k * FACT_MORCEAU, (k + 1) * FACT_MORCEAU), k, n });
+    this.cache.set(id, bytes); return n;
+  },
+  async remove(f) {
+    if (!factEnLigne() || !f.pdf) return;
+    const n = f.pdf.n || 1; const b = Store.fb.batch();
+    for (let k = 0; k < n; k++) b.delete(Store.fb.collection(FACT_PDF).doc(f.id + '_' + k));
+    b.delete(Store.fb.collection(FACT_TXT).doc(f.id));
+    try { await b.commit(); } catch (e) { }
+    this.cache.delete(f.id);
+  }
+};
+
+/* ---------- lecture automatique ---------- */
+const FactLecture = {
+  file: [], tourne: false,
+  aLire: f => !!f && !!f.pdf && (f.lu === 'a_lire' || (!f.corrige && f.lu !== 'scan' && (f.luVersion || 0) < GABARITS_VERSION)),
+  planifier() {
+    if (!factEnLigne()) return;
+    for (const f of Store.all('factures')) if (this.aLire(f) && !this.file.includes(f.id)) this.file.push(f.id);
+    this.tourner();
+  },
+  async tourner() {
+    if (this.tourne) return; this.tourne = true;
+    try {
+      while (this.file.length) {
+        const id = this.file.shift(); const f = Store.get('factures', id);
+        if (!this.aLire(f)) continue;
+        try { await lireFacture(f); } catch (e) { console.warn('lecture facture', id, e); try { await Store.patch('factures', id, { lu: 'erreur', luVersion: GABARITS_VERSION, luErreur: String(e && e.message || e).slice(0, 200) }); } catch (_) { } }
+      }
+    } finally { this.tourne = false; }
+  }
+};
+async function lireFacture(f) {
+  const lib = await chargerPdfJs();
+  const octets = await FactPdf.get(f);
+  const pages = await FactEngine.lirePdf(lib, octets.slice());
+  const r = FactEngine.lire(GABARITS, pages, { email: f.mail && f.mail.email, sujet: f.mail && f.mail.sujet });
+  const patch = { lu: r.lu, luLe: new Date().toISOString(), luVersion: GABARITS_VERSION };
+  for (const k of ['numero', 'date', 'echeance', 'fournisseur', 'gabarit', 'type']) if (r[k]) patch[k] = r[k];
+  for (const k of ['ht', 'ttc', 'tvaMontant', 'tva']) if (r[k] != null) patch[k] = r[k];
+  if (r.tvaDetail && r.tvaDetail.length) patch.tvaDetail = r.tvaDetail;
+  if (r.lignes && r.lignes.length) { patch.lignes = r.lignes.slice(0, 200); patch.lignesOk = !!r.lignesOk; }
+  if (r.note) patch.luNote = r.note;
+  if (patch.type === 'avoir') patch.statut = 'na';
+  if (!patch.echeance && !f.echeance && patch.date && GABARITS[patch.gabarit] && GABARITS[patch.gabarit].delai != null) patch.echeance = addDays(patch.date, GABARITS[patch.gabarit].delai);
+  try { await Store.fb.collection(FACT_TXT).doc(f.id).set({ t: FactEngine.texteDe(pages).slice(0, 300000), pages: pages.length, le: patch.luLe }); } catch (e) { }
+  await Store.patch('factures', f.id, patch);
+  await dedoublonner(Object.assign({}, f, patch));
+}
+function cleFacture(f) {
+  const n = String(f.numero || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^0+/, '');
+  const four = String(f.gabarit || f.fournisseur || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return n && four ? four + '|' + (f.type === 'avoir' ? 'A' : '') + n : '';
+}
+async function dedoublonner(f) {
+  const k = cleFacture(f); if (!k) return;
+  const autres = Store.all('factures').filter(x => x.id !== f.id && cleFacture(x) === k);
+  if (!autres.length) return;
+  const rang = x => x.source === 'mail' ? 0 : x.source === 'scan' ? 1 : 2;
+  const tous = [f, ...autres].sort((a, b) => rang(a) - rang(b) || String(a.cree || '').localeCompare(String(b.cree || '')));
+  const garder = tous[0];
+  for (const x of tous.slice(1)) {
+    const patch = {};
+    if (x.statut === 'payee' && garder.statut !== 'payee') { patch.statut = 'payee'; patch.payeeLe = x.payeeLe || todayStr(); }
+    if (x.note && !garder.note) patch.note = x.note;
+    if (x.photo && !garder.photo) patch.photo = x.photo;
+    if (Object.keys(patch).length) await Store.patch('factures', garder.id, patch);
+    await FactPdf.remove(x); await Store.remove('factures', x.id);
+  }
+  toast(`Doublon retiré : ${garder.fournisseur || 'facture'} n° ${garder.numero}`, 'ok');
+}
+async function importerPdfs(files) {
+  if (!factEnLigne()) { toast('Il faut être connecté à la base pour ajouter des PDF', 'err'); return; }
+  let n = 0, deja = 0;
+  for (const file of Array.from(files || [])) {
+    if (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name)) continue;
+    try {
+      const u = new Uint8Array(await file.arrayBuffer()); const sha = await sha256Hex(u); const id = 'm-' + sha.slice(0, 24);
+      if (Store.get('factures', id)) { deja++; continue; }
+      const nb = await FactPdf.put(id, u);
+      await Store.set('factures', id, { type: 'facture', fournisseur: '', numero: '', date: todayStr(), echeance: '', ht: null, tva: null, ttc: null, statut: 'a_payer', note: '', photo: '', source: 'scan', lu: 'a_lire', pdf: { n: nb, taille: u.length, sha256: sha, nom: file.name }, cree: new Date().toISOString() });
+      n++;
+    } catch (e) { toast('« ' + file.name + ' » : ' + e.message, 'err', 5000); }
+  }
+  toast(n ? `${n} PDF ajouté${n > 1 ? 's' : ''}, lecture en cours…` : deja ? 'Ces PDF sont déjà dans l\'appli' : 'Aucun PDF', n ? 'ok' : '');
+  FactLecture.planifier();
+}
+Store.onChange(c => { if (c === 'factures') setTimeout(() => FactLecture.planifier(), 300); });
+setInterval(() => FactLecture.planifier(), 20000);
+
+/* ---------- affichage du PDF ---------- */
+async function voirPdf(id) {
+  const f = Store.get('factures', id); if (!f) return;
+  openModal({ title: `${f.fournisseur || 'Facture'}${f.numero ? ' · n° ' + f.numero : ''}`, body: `<div id="pdf-view" class="pdf-view"><div class="muted">Ouverture du PDF…</div></div>`, footer: `<button class="btn" data-act="pdfshare" data-id="${esc(id)}">Partager / imprimer</button><button class="btn btn-primary" data-close="1">Fermer</button>` });
+  try {
+    const lib = await chargerPdfJs(); const octets = await FactPdf.get(f);
+    const doc = await lib.getDocument({ data: octets.slice(), isEvalSupported: false }).promise;
+    const box = $('#pdf-view'); if (!box) return; box.innerHTML = '';
+    const largeur = Math.min(box.clientWidth || 800, 1100);
+    for (let p = 1; p <= doc.numPages; p++) {
+      const page = await doc.getPage(p); const v1 = page.getViewport({ scale: 1 }); const k = largeur / v1.width; const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const vp = page.getViewport({ scale: k * dpr }); const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height; c.style.width = (vp.width / dpr) + 'px'; c.className = 'pdf-page';
+      box.appendChild(c); await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+    }
+  } catch (e) { const box = $('#pdf-view'); if (box) box.innerHTML = `<div class="notice">PDF impossible à afficher : ${esc(e.message)}</div>`; }
+}
+async function partagerPdf(id) {
+  const f = Store.get('factures', id); if (!f) return;
+  try { const octets = await FactPdf.get(f); const blob = new Blob([octets], { type: 'application/pdf' }); await deliverPdf(blob, (f.pdf && f.pdf.nom) || `facture-${f.numero || f.id}.pdf`); } catch (e) { toast('Partage impossible : ' + e.message, 'err'); }
+}
+
+/* ---------- fiche détaillée ---------- */
+function ouvrirFacture(id) {
+  const f = Store.get('factures', id); if (!f) return;
+  const lignes = Array.isArray(f.lignes) ? f.lignes : [];
+  const tvaD = Array.isArray(f.tvaDetail) ? f.tvaDetail : [];
+  const etat = { ok: ['pill-ok', 'Lue automatiquement'], a_verifier: ['pill-warn', 'À vérifier'], a_lire: ['pill-info', 'Lecture en cours…'], scan: ['pill-neutral', 'Scan sans texte'], erreur: ['pill-crit', 'Lecture impossible'] }[f.lu] || null;
+  const body = `<div class="stack">
+    <div class="row" style="flex-wrap:wrap;gap:8px">${f.source === 'mail' ? '<span class="pill pill-info">📧 Reçue par mail</span>' : f.source === 'scan' ? '<span class="pill pill-neutral">📄 PDF ajouté</span>' : ''}${etat ? `<span class="pill ${etat[0]}">${etat[1]}</span>` : ''}${f.type === 'avoir' ? '<span class="pill pill-ok">Avoir</span>' : ''}</div>
+    <div class="fact-grid">
+      <div><span class="k">Fournisseur</span><b>${esc(f.fournisseur || '—')}</b></div>
+      <div><span class="k">Numéro</span><b>${esc(f.numero || '—')}</b></div>
+      <div><span class="k">Date</span><b>${esc(f.date ? fmtDate(f.date) : '—')}</b></div>
+      <div><span class="k">Échéance</span><b>${esc(f.echeance ? fmtDate(f.echeance) : '—')}</b></div>
+      <div><span class="k">Total HT</span><b class="num">${esc(fmtMoney(num(f.ht)))}</b></div>
+      <div><span class="k">TVA</span><b class="num">${esc(fmtMoney(num(f.tvaMontant)))}${f.tva != null ? ` <small class="muted">(${esc(String(f.tva).replace('.', ','))} %)</small>` : ''}</b></div>
+      <div><span class="k">Total TTC</span><b class="num">${esc(fmtMoney(num(f.ttc)))}</b></div>
+      <div><span class="k">Statut</span><b>${f.type === 'avoir' ? 'Avoir' : f.statut === 'payee' ? 'Payée' : 'À payer'}</b></div>
+    </div>
+    ${tvaD.length ? `<div class="card-sub"><div class="eyebrow">Détail TVA</div><table class="table"><thead><tr><th>Taux</th><th class="right">Base HT</th><th class="right">TVA</th></tr></thead><tbody>${tvaD.map(t => `<tr><td>${esc(String(t.taux).replace('.', ','))} %</td><td class="right num">${esc(fmtMoney(t.base))}</td><td class="right num">${esc(fmtMoney(t.montant))}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    ${lignes.length ? `<div class="card-sub"><div class="eyebrow">Lignes de la facture (${lignes.length})${f.lignesOk === false ? ' · <span class="pill pill-warn">total à vérifier</span>' : ''}</div><div class="table-wrap"><table class="table"><thead><tr><th>Réf.</th><th>Désignation</th><th class="right">Qté</th><th class="right">PU HT</th><th class="right">Montant</th></tr></thead><tbody>${lignes.map(l => `<tr><td class="muted">${esc(l.ref || '')}</td><td>${esc(l.designation || '')}</td><td class="right num">${esc(l.qte != null ? fmtQty(l.qte) : '')}${l.unite ? ' ' + esc(l.unite) : ''}</td><td class="right num">${esc(l.pu != null ? fmtMoney(l.pu) : '')}</td><td class="right num">${esc(l.montant != null ? fmtMoney(l.montant) : '')}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
+    ${f.mail ? `<p class="help">Mail : « ${esc(f.mail.sujet || '')} » de ${esc(f.mail.de || '')}</p>` : ''}
+  </div>`;
+  openModal({ title: `${f.fournisseur || 'Facture'}${f.numero ? ' · n° ' + f.numero : ''}`, body, footer: `${f.pdf ? `<button class="btn btn-xl" data-act="pdfview" data-id="${esc(id)}">📄 Voir le PDF</button>` : ''}${f.pdf ? `<button class="btn" data-act="factrelire" data-id="${esc(id)}">↻ Relire</button>` : ''}<button class="btn" data-act="editfact" data-id="${esc(id)}">${I.pencil} Corriger</button><button class="btn btn-primary" data-close="1">Fermer</button>` });
+}
+
+/* ---------- écran Factures (remplace l'ancien) ---------- */
+Object.assign(FactOpts, { q: '' });
+Views.factures = function () {
+  const t = todayStr(); let all = Store.all('factures');
+  const month = t.slice(0, 7);
+  const estF = f => f.type === 'facture';
+  const totalMois = all.filter(f => estF(f) && (f.date || '').startsWith(month)).reduce((s, f) => s + (num(f.ttc) || 0), 0);
+  const aPayer = all.filter(f => estF(f) && f.statut !== 'payee').reduce((s, f) => s + (num(f.ttc) || 0), 0);
+  const echues = all.filter(f => estF(f) && f.statut !== 'payee' && f.echeance && f.echeance <= t).length;
+  const aVerif = all.filter(f => f.lu === 'a_verifier' || f.lu === 'erreur').length;
+  const q = (FactOpts.q || '').toLowerCase().trim();
+  let list = all.filter(f => (FactOpts.type === 'tous' || f.type === FactOpts.type || (FactOpts.type === 'verif' && (f.lu === 'a_verifier' || f.lu === 'erreur'))) && (FactOpts.statut === 'tous' || (FactOpts.statut === 'a_payer' ? (estF(f) && f.statut !== 'payee') : f.statut === 'payee')))
+    .filter(f => !q || [f.fournisseur, f.numero, f.note, f.mail && f.mail.sujet].join(' ').toLowerCase().includes(q))
+    .sort((a, b) => (b.date || '').localeCompare(a.date || '') || String(b.cree || '').localeCompare(String(a.cree || '')));
+  const lu = f => f.lu === 'a_lire' ? '<span class="pill pill-info">lecture…</span>' : f.lu === 'a_verifier' ? '<span class="pill pill-warn">à vérifier</span>' : f.lu === 'erreur' ? '<span class="pill pill-crit">illisible</span>' : f.lu === 'scan' ? '<span class="pill pill-neutral">scan</span>' : '';
+  const item = f => { const late = estF(f) && f.statut !== 'payee' && f.echeance && f.echeance <= t; const thumb = f.photo ? `<img class="photo-thumb" src="${esc(f.photo.startsWith('data:') ? f.photo : '/_blob/' + f.photo)}" alt="" data-act="viewphoto" data-id="${f.id}" style="cursor:zoom-in">` : `<span class="photo-thumb fact-ico" data-act="${f.pdf ? 'pdfview' : 'factopen'}" data-id="${f.id}">${f.pdf ? '📄' : I.receipt}</span>`;
+    return `<div class="list-item fact-item">${thumb}<div class="main" data-act="factopen" data-id="${f.id}" style="cursor:pointer"><div class="title"><span class="pill ${f.type === 'facture' ? 'pill-info' : f.type === 'avoir' ? 'pill-ok' : 'pill-neutral'}">${f.type === 'facture' ? 'Facture' : f.type === 'avoir' ? 'Avoir' : 'BL'}</span> ${esc(f.fournisseur || 'Fournisseur ?')}${f.numero ? ` <span class="muted">n° ${esc(f.numero)}</span>` : ''} ${f.source === 'mail' ? '<span title="reçue par mail">📧</span>' : ''} ${lu(f)}</div><div class="sub">${esc(fmtDate(f.date))}${f.ttc != null ? ` · <b>${esc(fmtMoney(num(f.ttc)))}</b> TTC` : ''}${f.ht != null ? ` · ${esc(fmtMoney(num(f.ht)))} HT` : ''}${f.echeance && estF(f) ? ` · échéance ${esc(fmtDate(f.echeance))}` : ''}${Array.isArray(f.lignes) && f.lignes.length ? ` · ${f.lignes.length} ligne${f.lignes.length > 1 ? 's' : ''}` : ''}${f.note ? ' · ' + esc(f.note) : ''}</div></div>${estF(f) ? `<span class="pill ${f.statut === 'payee' ? 'pill-ok' : late ? 'pill-crit' : 'pill-warn'}">${f.statut === 'payee' ? 'Payée' : late ? 'Échue' : 'À payer'}</span>${f.statut !== 'payee' ? `<button class="btn btn-sm btn-dark" data-act="factpayee" data-id="${f.id}">✓ Payée</button>` : ''}` : ''}<button class="icon-btn" data-act="editfact" data-id="${f.id}" aria-label="Modifier">${I.pencil}</button></div>`; };
+  return `
+  <div class="page-head"><div><div class="eyebrow">Fournisseurs</div><h1>Factures & bons de livraison</h1><p class="lead">Les factures reçues par mail arrivent toutes seules, montants lus automatiquement.</p></div>
+    <div class="toolbar"><button class="btn btn-xl" data-act="factpdf">📄 Ajouter des PDF</button><button class="btn btn-xl" data-act="newfact" data-type="bl">${I.camera} Bon de livraison</button><button class="btn btn-xl btn-primary" data-act="newfact" data-type="facture">${I.camera} Facture</button></div></div>
+  <div class="stats"><div class="stat"><span class="v num">${esc(fmtMoney(totalMois))}</span><span class="k">factures du mois (TTC)</span></div><div class="stat ${aPayer ? 'alert' : ''}"><span class="v num">${esc(fmtMoney(aPayer))}</span><span class="k">reste à payer</span></div><div class="stat ${echues ? 'alert' : ''}"><span class="v num">${echues}</span><span class="k">factures échues</span></div><div class="stat ${aVerif ? 'alert' : ''}" data-act="facttype" data-v="verif" style="cursor:pointer"><span class="v num">${aVerif}</span><span class="k">à vérifier</span></div></div>
+  <div class="card"><div class="card-head" style="flex-wrap:wrap;gap:10px"><div class="seg"><button class="${FactOpts.type === 'tous' ? 'on' : ''}" data-act="facttype" data-v="tous">Tout</button><button class="${FactOpts.type === 'facture' ? 'on' : ''}" data-act="facttype" data-v="facture">Factures</button><button class="${FactOpts.type === 'avoir' ? 'on' : ''}" data-act="facttype" data-v="avoir">Avoirs</button><button class="${FactOpts.type === 'bl' ? 'on' : ''}" data-act="facttype" data-v="bl">BL</button><button class="${FactOpts.type === 'verif' ? 'on' : ''}" data-act="facttype" data-v="verif">À vérifier</button></div><div class="seg"><button class="${FactOpts.statut === 'tous' ? 'on' : ''}" data-act="factstatut" data-v="tous">Tous statuts</button><button class="${FactOpts.statut === 'a_payer' ? 'on' : ''}" data-act="factstatut" data-v="a_payer">À payer</button><button class="${FactOpts.statut === 'payee' ? 'on' : ''}" data-act="factstatut" data-v="payee">Payées</button></div><input class="input" type="search" placeholder="Rechercher fournisseur, n°…" value="${esc(FactOpts.q || '')}" data-on="factsearch" style="max-width:260px"></div>
+  ${list.length ? `<div class="list">${list.map(item).join('')}</div>` : `<div class="empty"><strong>Aucun document ici.</strong><span>Les factures reçues par mail apparaîtront ici automatiquement.</span></div>`}</div>`;
+};
+Object.assign(Actions, {
+  factpdf: () => $('#file-pdf').click(),
+  factopen: el => ouvrirFacture(el.dataset.id),
+  pdfview: el => voirPdf(el.dataset.id),
+  pdfshare: el => partagerPdf(el.dataset.id),
+  factrelire: async el => { const id = el.dataset.id; await Store.patch('factures', id, { lu: 'a_lire' }); closeModal(); toast('Relecture…'); FactLecture.planifier(); },
+  delfact: async el => { if (await confirmDialog('Supprimer ce document ?', { danger: true, ok: 'Supprimer' })) { const f = Store.get('factures', el.dataset.id); if (f) await FactPdf.remove(f); await Store.remove('factures', el.dataset.id); closeModal(); } }
+});
+Object.assign(Inputs, { factsearch: el => { FactOpts.q = el.value; render(); setTimeout(() => { const i = $('[data-on="factsearch"]'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 0); } });
+(function () { if (!$('#file-pdf')) { const i = document.createElement('input'); i.type = 'file'; i.id = 'file-pdf'; i.accept = 'application/pdf,.pdf'; i.multiple = true; i.hidden = true; document.body.appendChild(i); } $('#file-pdf').addEventListener('change', e => { importerPdfs(e.target.files); e.target.value = ''; }); })();
 
 </script>
 </body>
