@@ -2805,7 +2805,7 @@ if (typeof module !== 'undefined') module.exports = FactEngine;
    où lire le numéro, la date, l'échéance, le total HT, la TVA (taux et montants), le TTC et les lignes.
    Quand on améliore un gabarit, on augmente GABARITS_VERSION : l'appli relit alors toute seule
    les factures déjà importées (sauf celles corrigées à la main). */
-const GABARITS_VERSION = 7;
+const GABARITS_VERSION = 8;
 const GABARITS = (() => {
   const M = FactEngine.montant, MS = FactEngine.montants, D = FactEngine.dateIso, cols = FactEngine.cols;
   const TAUX = [2.1, 5.5, 6, 10, 20, 21, 0];
@@ -3202,7 +3202,7 @@ async function lireFacture(f) {
   for (const k of ['numero', 'date', 'echeance', 'fournisseur', 'gabarit', 'type']) if (r[k]) patch[k] = r[k];
   const regle = f.source === 'mail' && f.mail ? regleFacture(f.mail.email, f.mail.sujet) : null;
   if (regle) patch.fournisseur = regle.f;   // le nom officiel du fournisseur, d'après son mail de facture
-  for (const k of ['ht', 'ttc', 'tvaMontant', 'tva', 'htMarchandise']) if (r[k] != null) patch[k] = r[k];
+  for (const k of ['ht', 'ttc', 'tvaMontant', 'tva', 'htMarchandise', 'consignes']) if (r[k] != null) patch[k] = r[k];
   if (r.statut === 'payee' && f.statut !== 'payee') { patch.statut = 'payee'; patch.payeeLe = r.date || todayStr(); }
   if (r.tvaDetail && r.tvaDetail.length) patch.tvaDetail = r.tvaDetail;
   if (r.lignes && r.lignes.length) { patch.lignes = r.lignes.slice(0, 200); patch.lignesOk = !!r.lignesOk; }
@@ -3294,7 +3294,7 @@ function ouvrirFacture(id) {
       <div><span class="k">Échéance</span><b>${esc(f.echeance ? fmtDate(f.echeance) : '—')}</b></div>
       <div><span class="k">Total HT</span><b class="num">${esc(fmtMoney(num(f.ht)))}</b></div>
       <div><span class="k">TVA</span><b class="num">${esc(fmtMoney(num(f.tvaMontant)))}${f.tva != null ? ` <small class="muted">(${esc(String(f.tva).replace('.', ','))} %)</small>` : ''}</b></div>
-      <div><span class="k">Total TTC</span><b class="num">${esc(fmtMoney(num(f.ttc)))}</b></div>
+      <div><span class="k">Total TTC</span><b class="num">${esc(fmtMoney(num(f.ttc)))}</b></div>${f.consignes ? `<div><span class="k">Consignes (caisses)</span><b class="num">${esc(fmtMoney(num(f.consignes)))}</b></div>` : ''}
       <div><span class="k">Statut</span><b>${f.type === 'avoir' ? 'Avoir' : f.statut === 'payee' ? 'Payée' : 'À payer'}</b></div>
     </div>
     ${tvaD.length ? `<div class="card-sub"><div class="eyebrow">Détail TVA</div><table class="table"><thead><tr><th>Taux</th><th class="right">Base HT</th><th class="right">TVA</th></tr></thead><tbody>${tvaD.map(t => `<tr><td>${esc(String(t.taux).replace('.', ','))} %</td><td class="right num">${esc(fmtMoney(t.base))}</td><td class="right num">${esc(fmtMoney(t.montant))}</td></tr>`).join('')}</tbody></table></div>` : ''}
