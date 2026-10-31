@@ -2806,7 +2806,7 @@ if (typeof module !== 'undefined') module.exports = FactEngine;
    où lire le numéro, la date, l'échéance, le total HT, la TVA (taux et montants), le TTC et les lignes.
    Quand on améliore un gabarit, on augmente GABARITS_VERSION : l'appli relit alors toute seule
    les factures déjà importées (sauf celles corrigées à la main). */
-const GABARITS_VERSION = 6;
+const GABARITS_VERSION = 7;
 const GABARITS = (() => {
   const M = FactEngine.montant, MS = FactEngine.montants, D = FactEngine.dateIso, cols = FactEngine.cols;
   const TAUX = [2.1, 5.5, 6, 10, 20, 21, 0];
@@ -2855,7 +2855,7 @@ const GABARITS = (() => {
       echeance: /^-?\d[\d .]*?\s{2,}\d{2}\/\d{2}\/\d{4}\s{2,}-?\d[\d .]*?\s{2,}(\d{2}\/\d{2}\/\d{4})/m,
       ttc: /^-?\d[\d .]*?\s{2,}\d{2}\/\d{2}\/\d{4}\s{2,}(-?\d[\d .]*?)\s{2,}\d{2}\/\d{2}\/\d{4}/m,
       consignes: /^Consignes\s+(-?\d[\d .]*\.\d{2})\s*$/m,
-      tvaDetail: (pages) => blocTva(pages, /TOTAL COLIS\s+TOTAL HT/, /ANCIEN SOLDE/, t => { const v = MS(t); const i = v.findIndex((x, k) => k > 0 && k < v.length - 1 && estTaux(x) && x > 0); return i > 0 ? { taux: v[i], base: v[i - 1], montant: v[i + 1] } : null; }),
+      tvaDetail: (pages) => { const d = blocTva(pages, /TOTAL COLIS\s+TOTAL HT/, /ANCIEN SOLDE/, t => { const v = MS(t); const i = v.findIndex((x, k) => k > 0 && k < v.length - 1 && estTaux(x) && x > 0); return i > 0 ? { taux: v[i], base: v[i - 1], montant: v[i + 1] } : null; }); if (d.length) return d; const out = []; for (const t of toutes(pages)) { const m = t.match(/(-?\d[\d ]*\.\d{2})\s{2,}(5\.50|20\.00|10\.00|2\.10)\s{2,}(-?\d[\d ]*\.\d{2})/); if (m) out.push({ base: M(m[1]), taux: M(m[2]), montant: M(m[3]) }); } return out; },
       ht: (pages) => { const d = GABARITS.primandco.tvaDetail(pages); return d.length ? somme(d, 'base') : null; },
       tvaMontant: (pages) => { const d = GABARITS.primandco.tvaDetail(pages); return d.length ? somme(d, 'montant') : null; },
       htMarchandise: (pages) => { const L = toutes(pages); const i = L.findIndex(t => /TOTAL COLIS\s+TOTAL HT/.test(t)); if (i < 0) return null; const v = MS(L[i + 1] || ''); return v.length > 1 ? v[1] : null; },
@@ -2979,6 +2979,32 @@ const GABARITS = (() => {
       numero: /^\d{3,6}\s{2,}\d{2}\/\d{2}\/\d{4}\s{2,}(\d{4,7})\b/m, date: /^\d{3,6}\s{2,}(\d{2}\/\d{2}\/\d{4})\s{2,}\d{4,7}\b/m, echeance: /ECHEANCE AU\s+(\d{2}\/\d{2}\/\d{4})/,
       ht: { ligne: /TOTAL HT/ }, tvaMontant: { ligne: /TOTAL TVA/ }, ttc: { ligne: /NET A PAYER/ }, htMarchandise: /^\d+\s{2,}TOTAL HT\s+([\d.]+)/m,
       lignes: (pages) => lignesPar(pages, /^(\d+\.\d{2})\s+(.+?)\s{2,}.*?(-?\d+(?:\.\d{1,3})?)\s([KPUC])\s+(\d+\.\d{2,3})\s{2,}(-?\d+\.\d{2})\s{2,}\d(?:\s+\w)?$/, (m) => ({ ref: '', designation: m[2].trim(), qte: M(m[3]), unite: m[4] === 'K' ? 'kg' : 'pièce', colis: M(m[1]), pu: M(m[5]), montant: M(m[6]) }))
+    },
+
+    /* ---------- Factures ponctuelles ---------- */
+    shopify: {
+      nom: 'Shopify', email: /^billing@shopify\.com$/i, texte: /Bill #\d+/,
+      numero: /Bill #(\d+)/, date: /Paid on ([A-Za-z]+ \d{1,2}, \d{4})/,
+      ht: /Subtotal\s+€([\d.,]+)/, tvaMontant: /VAT [\d.]+%\*?\s+€([\d.,]+)/, ttc: /^Total\s+€([\d.,]+)/m,
+      statut: (p, t) => /Paid on/.test(t) ? 'payee' : ''
+    },
+    seguard: {
+      nom: 'Seguard', email: /@seguard\.fr$/i, texte: /SEGUARD/i,
+      numero: /Num\S*ro :\s+(\d{5,})/, date: /^Date :\s+(\d{2}\/\d{2}\/\d{4})/m,
+      ht: /TOTAL H\.T\s+([\d ]*\d,\d{2})/, tvaMontant: /TOTAL TVA\s+([\d ]*\d,\d{2})/, ttc: /TOTAL TTC\s+([\d ]*\d,\d{2})/
+    },
+    metro: {
+      nom: 'Metro', email: /^no-reply@metro-marketplace\.eu$/i, texte: /Metro Markets GmbH/,
+      numero: /\b(INV-\d{2}-[A-Z]{2}-\d+)\b/, date: /^BHVA\s{2,}BHVA\s{2,}(\d{2}\.\d{2}\.\d{4})/m,
+      ht: /Total Net:\s*([\d.]*\d,\d{2})\s*€/, ttc: /Total Brut:\s*([\d.]*\d,\d{2})\s*€/,
+      tvaMontant: (p, t) => { const v = [...t.matchAll(/Total TVA [\d,]+%:\s*([\d.]*\d,\d{2})\s*€/g)].map(m => M(m[1])); return v.length ? r2(v.reduce((a, b) => a + b, 0)) : null; }
+    },
+    envie: {
+      nom: 'Envie (SAV)', email: /^magasin\.envie@envie\.org$/i, texte: /Facture SAV I\d+/,
+      numero: /Facture SAV (I\d+)/, date: /Facture SAV I\d+ du (\d{2}\/\d{2}\/\d{4})/,
+      ht: /Sous total HT avant acomptes\s+([\d ]*\d,\d{2})/, tvaMontant: /Sous total TVA avant acomptes\s+([\d ]*\d,\d{2})/,
+      ttc: (p, t) => { const a = M((t.match(/Sous total HT avant acomptes\s+([\d ]*\d,\d{2})/) || [])[1]); const b = M((t.match(/Sous total TVA avant acomptes\s+([\d ]*\d,\d{2})/) || [])[1]); return a != null ? r2(a + (b || 0)) : null; },
+      statut: (p, t) => /Acompte vers/.test(t) ? 'payee' : ''
     },
 
     /* ---------- Fournisseurs hors marchandise ---------- */
