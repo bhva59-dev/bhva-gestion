@@ -2585,7 +2585,7 @@ const FactEngine = (() => {
   }
   const RE_MONTANT = /-?\(?\d{1,3}(?:[   .,]\d{3})*(?:[.,]\d{1,4})\)?-?|-?\d+(?:[.,]\d{1,4})/g;
   function montants(texte) { return (String(texte || '').match(RE_MONTANT) || []).map(montant).filter(v => v != null); }
-  const MOIS = { janv: 1, janvier: 1, fevr: 2, fevrier: 2, févr: 2, février: 2, mars: 3, avr: 4, avril: 4, mai: 5, juin: 6, juil: 7, juillet: 7, aout: 8, août: 8, sept: 9, septembre: 9, oct: 10, octobre: 10, nov: 11, novembre: 11, dec: 12, decembre: 12, déc: 12, décembre: 12 };
+  const MOIS = { janv: 1, janvier: 1, fevr: 2, fevrier: 2, févr: 2, février: 2, mars: 3, avr: 4, avril: 4, mai: 5, juin: 6, juil: 7, juillet: 7, aout: 8, août: 8, sept: 9, septembre: 9, oct: 10, octobre: 10, nov: 11, novembre: 11, dec: 12, decembre: 12, déc: 12, décembre: 12, january: 1, jan: 1, february: 2, feb: 2, march: 3, mar: 3, april: 4, apr: 4, may: 5, june: 6, jun: 6, july: 7, jul: 7, august: 8, aug: 8, september: 9, sep: 9, october: 10, november: 11, december: 12 };
   function dateIso(s) {
     if (!s) return '';
     s = String(s).trim();
@@ -2595,6 +2595,8 @@ const FactEngine = (() => {
     if (m) { let y = m[3]; if (y.length === 2) y = '20' + y; const d = +m[1], mo = +m[2]; if (mo < 1 || mo > 12 || d < 1 || d > 31) return ''; return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`; }
     m = s.toLowerCase().match(/(\d{1,2})\s+([a-zéû]+)\.?\s+(\d{4})/);
     if (m && MOIS[m[2]]) return `${m[3]}-${String(MOIS[m[2]]).padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+    m = s.toLowerCase().match(/([a-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})/);
+    if (m && MOIS[m[1]]) return `${m[3]}-${String(MOIS[m[1]]).padStart(2, '0')}-${m[2].padStart(2, '0')}`;
     return '';
   }
   const RE_DATE = /\b\d{1,2}[\/.\-]\d{1,2}[\/.\-](?:\d{4}|\d{2})\b|\b\d{4}-\d{2}-\d{2}\b/;
@@ -2613,7 +2615,7 @@ const FactEngine = (() => {
         if (!it.str || !it.str.trim()) continue;
         const tr = it.transform; const h = Math.hypot(tr[2], tr[3]) || it.height || 8;
         if (Math.abs(tr[1]) > Math.abs(tr[0]) * 2) continue; // texte vertical : ignoré
-        items.push({ s: it.str, x: tr[4], y: vp.height - tr[5], w: it.width, h });
+        items.push({ s: it.str.replace(/\u0000/g, '-'), x: tr[4], y: vp.height - tr[5], w: it.width, h });
       }
       pages.push({ n: p, w: vp.width, h: vp.height, lignes: grouper(items) });
     }
@@ -2725,7 +2727,9 @@ const FactEngine = (() => {
       return undefined;
     };
     for (const k of ['numero', 'date', 'echeance']) { const v = champ(g[k]); if (v) r[k] = k === 'numero' ? String(v).trim() : dateIso(v); }
-    for (const k of ['ht', 'tvaMontant', 'ttc']) { const v = champ(g[k]); if (v != null && v !== '') r[k] = typeof v === 'number' ? v : montant(v); }
+    for (const k of ['ht', 'tvaMontant', 'ttc', 'htMarchandise']) { const v = champ(g[k]); if (v != null && v !== '') r[k] = typeof v === 'number' ? v : montant(v); }
+    if (typeof g.nom === 'function') { const n = g.nom(pages, texte, outils); if (n) r.fournisseur = n; }
+    if (g.statut) { const st = g.statut(pages, texte, outils); if (st) r.statut = st; }
     if (g.tvaDetail) r.tvaDetail = g.tvaDetail(pages, texte, outils) || [];
     if (g.lignes) r.lignes = g.lignes(pages, texte, outils) || [];
     if (g.type) { const t = g.type(pages, texte, outils); if (t) r.type = t; }
@@ -2743,6 +2747,7 @@ const FactEngine = (() => {
   /* ---------- lecture complète ---------- */
   function lire(gabarits, pages, info = {}) {
     const texte = texteDe(pages);
+    if (info.nom && /conditions|cgv|catalogue|tarif|promotion/i.test(info.nom) && !/factur|invoice/i.test(texte.slice(0, 600))) return { lu: 'ignore', note: 'Pas une facture' };
     const vide = texte.replace(/\s/g, '').length < 30;
     if (vide) return { lu: 'scan', texte: '', note: 'PDF scanné sans texte' };
     const cle = reconnaitre(gabarits, info.email || '', texte);
@@ -2750,7 +2755,10 @@ const FactEngine = (() => {
     const base = generique(pages, texte);
     const spec = g ? appliquer(g, pages, texte) : {};
     const r = Object.assign({}, base, ...Object.entries(spec).filter(([k, v]) => v != null && v !== '' && !(Array.isArray(v) && !v.length)).map(([k, v]) => ({ [k]: v })));
-    if (g) { r.gabarit = cle; r.fournisseur = g.nom; }
+    if (g) { r.gabarit = cle; if (typeof g.nom === 'string') r.fournisseur = g.nom; else if (!r.fournisseur && g.nomDefaut) r.fournisseur = g.nomDefaut; }
+    // avoir (note de crédit)
+    if (!r.type && (/^\s*(?:AVOIR|NOTE DE CR[EÉ]DIT|CREDIT NOTE)\b/im.test(texte) || (r.ttc != null && r.ttc < 0))) r.type = 'avoir';
+    if (r.type === 'avoir') for (const k of ['ht', 'tvaMontant', 'ttc', 'htMarchandise']) if (r[k] != null) r[k] = Math.abs(r[k]);
     // compléter / contrôler les totaux
     if (r.ht == null && r.ttc != null && r.tvaMontant != null) r.ht = r2(r.ttc - r.tvaMontant);
     if (r.tvaMontant == null && r.ttc != null && r.ht != null) r.tvaMontant = r2(r.ttc - r.ht);
@@ -2763,9 +2771,10 @@ const FactEngine = (() => {
     }
     const ok = r.ttc != null && r.ht != null && r.tvaMontant != null && Math.abs(r.ht + r.tvaMontant - r.ttc) <= 0.06 && !!r.numero && !!r.date;
     r.lu = ok ? 'ok' : 'a_verifier';
-    if (r.lignes && r.lignes.length && r.ht != null) {
+    if (r.lignes && r.lignes.length && (r.ht != null || r.htMarchandise != null)) {
       const s = r2(r.lignes.reduce((a, l) => a + (l.montant || 0), 0));
-      r.lignesOk = Math.abs(s - r.ht) <= Math.max(0.06, Math.abs(r.ht) * 0.002);
+      const cible = r.htMarchandise != null ? r.htMarchandise : r.ht;
+      r.lignesOk = Math.abs(Math.abs(s) - Math.abs(cible)) <= Math.max(0.06, Math.abs(cible) * 0.002);
     }
     return r;
   }
@@ -2774,11 +2783,200 @@ const FactEngine = (() => {
 })();
 if (typeof module !== 'undefined') module.exports = FactEngine;
 /* ===================== Gabarits des fournisseurs =====================
-   Un gabarit par fournisseur : comment le reconnaître, où lire chaque montant.
+   Établis à partir des factures reçues par mail (oct. 2026). Pour chaque fournisseur :
+   où lire le numéro, la date, l'échéance, le total HT, la TVA (taux et montants), le TTC et les lignes.
    Quand on améliore un gabarit, on augmente GABARITS_VERSION : l'appli relit alors toute seule
    les factures déjà importées (sauf celles corrigées à la main). */
-const GABARITS_VERSION = 1;
-const GABARITS = {};
+const GABARITS_VERSION = 2;
+const GABARITS = (() => {
+  const M = FactEngine.montant, MS = FactEngine.montants, D = FactEngine.dateIso, cols = FactEngine.cols;
+  const TAUX = [2.1, 5.5, 6, 10, 20, 21, 0];
+  const estTaux = v => TAUX.some(t => Math.abs(t - v) < 0.001);
+  const r2 = v => Math.round(v * 100) / 100;
+  const toutes = pages => pages.flatMap(p => p.lignes.map(l => l.texte));
+  const somme = (arr, k) => r2(arr.reduce((a, x) => a + (x[k] || 0), 0));
+  // parcourt les lignes et garde celles qui correspondent au motif d'une ligne produit
+  const lignesPar = (pages, re, fabrique) => { const out = []; const L = toutes(pages); L.forEach((t, i) => { const m = t.match(re); if (m) { const l = fabrique(m, t, L, i); if (l && l.designation && /[A-Za-zÀ-ÿ]/.test(l.designation)) out.push(l); } }); return out; };
+  // bloc TVA : lignes « … base  taux  montant » situées entre deux repères
+  const blocTva = (pages, debut, fin, lire) => { const L = toutes(pages); const i = L.findIndex(t => debut.test(t)); if (i < 0) return []; const out = []; for (let j = i + 1; j < Math.min(L.length, i + 8); j++) { if (fin && fin.test(L[j]) && j > i + 1 && !/\d+[.,]\d{2}\s{2,}\d+[.,]\d{2}\s{2,}(5[.,]50|20[.,]00|10[.,]00|2[.,]10)/.test(L[j])) break; const r = lire(L[j]); if (r && r.base) out.push(r); } return out; };
+  const qteCoherente = (qte, pu, montant) => { if (qte == null || !pu || montant == null) return qte; if (Math.abs(qte * pu - montant) <= 0.06) return qte; if (Math.abs(qte * 1000 * pu - montant) <= 0.06) return qte * 1000; const q = montant / pu; return Math.abs(q - Math.round(q * 1000) / 1000) < 0.001 ? Math.round(q * 1000) / 1000 : qte; };
+
+  /* ---------- Marché de gros de Lomme (Lagache, Sital, Lomme Primeurs) : même logiciel de caisse ---------- */
+  const RE_MIN = /\s(-?\d+[.,]\d{1,3})\s{2,}(\d+[.,]\d{2,3})\s([A-Z]{1,3})\s{2,}(-?\d+[.,]\d{2})$/;
+  const min = (nom, email, texte, delai) => ({
+    nom, email, texte, delai,
+    numero: /FACTURE\s*N[°º]\s*(\d+)/i,
+    date: /FACTURE\s*N[°º]\s*\d+\s+DU\s+(\d{2}\/\d{2}\/\d{2,4})/i,
+    echeance: /Ech[ée]ance\s*:\s*(\d{2}\/\d{2}\/\d{2,4})/i,
+    ht: { ligne: /TOTAL HT/ }, tvaMontant: { ligne: /TOTAL TVA/ }, ttc: { ligne: /NET A PAYER/ },
+    htMarchandise: (pages) => { const L = toutes(pages); const i = L.findIndex(t => /HT MARCHANDISE/.test(t)); if (i < 0) return null; for (let j = i + 1; j < i + 4 && j < L.length; j++) { const v = MS(L[j]); if (v.length >= 3) return v[0]; } return null; },
+    tvaDetail: (pages) => blocTva(pages, /BASE TAXABLE/, /NET A PAYER/, t => { const v = MS(t.split(/TOTAL|NET A PAYER/)[0]); if (v.length >= 3 && estTaux(v[v.length - 2])) return { taux: v[v.length - 2], base: v[v.length - 3], montant: v[v.length - 1] }; return null; }),
+    lignes: (pages) => lignesPar(pages, RE_MIN, (m, t) => { const c = cols(t); return { ref: '', designation: c[0], detail: c.slice(1).filter(x => /[A-Za-z]/.test(x) && !/^\d/.test(x)).join(' · '), qte: M(m[1]), unite: m[3] === 'K' ? 'kg' : m[3] === 'U' || m[3] === 'P' ? 'pièce' : m[3] === 'C' ? 'colis' : m[3], pu: M(m[2]), montant: M(m[4]) }; })
+  });
+
+  return {
+    lagache: min('Lagache', /lagache-lomme\.com$/i, /SAS LAGACHE/i),
+    sital: min('Sital', /sital\.fr$/i, /SAS au capital de 200 000|499 855 898/),
+    lommeprimeurs: min('Lomme Primeurs', /lomme-primeurs\.com$/i, /LOMME PRIMEURS/i),
+
+    /* ---------- Leroy (MIN de Lomme, autre logiciel) ---------- */
+    leroy: {
+      nom: 'Leroy', email: /etsleroy\.com$/i, texte: /ETABLISSEMENT LEROY/i,
+      numero: /FACTURE N[°º]\s*(\d+)/i, date: /Date facture\s*:\s*(\d{2}\/\d{2}\/\d{4})/i, echeance: /Date d'[ée]ch[ée]ance\s*:\s*(\d{2}\/\d{2}\/\d{4})/i,
+      ht: { ligne: /^TOTAL HT/ }, tvaMontant: { ligne: /^TOTAL TVA/ }, ttc: { ligne: /^TOTAL TTC/ }, htMarchandise: { ligne: /^Total Marchandise/ },
+      tvaDetail: (pages) => toutes(pages).map(t => t.match(/^(\d+[.,]\d+)%\s{2,}(-?[\d.]+,\d{2})\s{2,}(-?[\d.]+,\d{2})/)).filter(Boolean).map(m => ({ taux: M(m[1]), base: M(m[2]), montant: M(m[3]) })),
+      lignes: (pages) => lignesPar(pages, /\s(-?\d+[.,]\d{1,3})\s{2,}(\d+[.,]\d{2,4})\s([A-Z]{1,4})\s{2,}(-?\d+[.,]\d{2})$/, (m, t) => ({ ref: '', designation: cols(t)[0], qte: M(m[1]), unite: /^KG/.test(m[3]) ? 'kg' : m[3], pu: M(m[2]), montant: M(m[4]) }))
+    },
+
+    /* ---------- Prim&Co (MIN de Lomme) ---------- */
+    primandco: {
+      nom: 'Prim&Co', email: /primandco\.fr$/i, texte: /primandco|978 324 143/i,
+      numero: /^(\d{4,6})\s{2,}\d{3,6}\s{2,}\d{2}\/\d{2}\/\d{4}\s*$/m,
+      date: /^\d{4,6}\s{2,}\d{3,6}\s{2,}(\d{2}\/\d{2}\/\d{4})\s*$/m,
+      echeance: /^[\d.]+\s{2,}\d{2}\/\d{2}\/\d{4}\s{2,}[\d.]+\s{2,}(\d{2}\/\d{2}\/\d{4})/m,
+      ttc: /^[\d.]+\s{2,}\d{2}\/\d{2}\/\d{4}\s{2,}([\d.]+)\s{2,}\d{2}\/\d{2}\/\d{4}/m,
+      tvaDetail: (pages) => blocTva(pages, /TOTAL COLIS\s+TOTAL HT/, /ANCIEN SOLDE/, t => { const v = MS(t); const i = v.findIndex((x, k) => k > 0 && k < v.length - 1 && estTaux(x) && x > 0); return i > 0 ? { taux: v[i], base: v[i - 1], montant: v[i + 1] } : null; }),
+      ht: (pages) => { const d = GABARITS.primandco.tvaDetail(pages); return d.length ? somme(d, 'base') : null; },
+      tvaMontant: (pages) => { const d = GABARITS.primandco.tvaDetail(pages); return d.length ? somme(d, 'montant') : null; },
+      htMarchandise: (pages) => { const L = toutes(pages); const i = L.findIndex(t => /TOTAL COLIS\s+TOTAL HT/.test(t)); if (i < 0) return null; const v = MS(L[i + 1] || ''); return v.length > 1 ? v[1] : null; },
+      lignes: (pages) => lignesPar(pages, /^(?:\*+)?(\d{6})\s{2,}(-?\d+)\s{2,}(.+?)\s{2,}(-?[\d.]+(?:\s{2,}-?[\d.]+)+)$/, (m) => { const v = MS(m[4]); if (v.length < 3) return null; const [q, pu, mt] = v.slice(-3); return { ref: m[1], designation: m[3].trim(), qte: q, unite: v.length >= 5 ? 'kg' : 'pièce', colis: M(m[2]), pu, montant: mt }; })
+    },
+
+    /* ---------- Tendriade (veau) — facture EDC ---------- */
+    tendriade: {
+      nom: 'Tendriade', email: /tendriade\.fr$/i, texte: /TENDRIADE/,
+      numero: /^(\d{6,8})\s+\d{2}\/\d{2}\/\d{2}\s+\d+\s+[A-Z]/m,
+      date: /^\d{6,8}\s+(\d{2}\/\d{2}\/\d{2})\s+\d+\s+[A-Z]/m,
+      echeance: /Echeance au\s*:\s*(\d{2}\/\d{2}\/\d{2,4})/i,
+      ttc: (p, texte) => { const t = texte.split('\n'); const i = t.findIndex(l => /TOTAL T\.T\.C\./.test(l)); if (i < 0) return null; const v = MS(t[i + 1] || ''); return v.length >= 3 ? v[v.length - 1] : null; },
+      tvaMontant: (p, texte) => { const t = texte.split('\n'); const i = t.findIndex(l => /TOTAL T\.T\.C\./.test(l)); if (i < 0) return null; const v = MS(t[i + 1] || ''); return v.length >= 3 ? v[v.length - 2] : null; },
+      ht: (p, texte) => { const t = texte.split('\n'); const i = t.findIndex(l => /TOTAL T\.T\.C\./.test(l)); if (i < 0) return null; const v = MS(t[i + 1] || ''); return v.length >= 3 ? v[v.length - 3] : null; },
+      tvaDetail: (p, texte) => { const t = texte.split('\n'); const i = t.findIndex(l => /TOTAL T\.T\.C\./.test(l)); if (i < 0) return []; const v = MS(t[i + 1] || ''); const out = []; for (let k = 0; k + 3 < v.length - 3; k += 4) if (estTaux(v[k + 1])) out.push({ base: v[k], taux: v[k + 1], montant: v[k + 3] }); return out; },
+      lignes: (pages) => lignesPar(pages, /^(.+?)\s{2,}(\d{10,})\s*(\d[\d ]*,\d{3})\s{2,}(\d+,\d{4})\d?\s{2,}(-?\d[\d ]*,\d{2})$/, (m) => { const ean = (m[2].match(/3\d{12}/) || [m[2]])[0]; const q = M(m[3]), pu = M(m[4]), mt = M(m[5]); return { ref: ean, designation: m[1].trim(), qte: q, unite: /PIECE/i.test(m[1]) ? 'pièce' : 'kg', pu, montant: mt }; })
+    },
+
+    /* ---------- Chicken Masters (Belgique) ---------- */
+    chickenmasters: {
+      nom: 'Chicken Masters', email: /chickenmasters\.be$/i, texte: /Chicken Masters/i,
+      numero: /Num[ée]ro\s*:\s*:\s*(\d+)/, date: /Date\s*:\s*:\s*(\d{2}\/\d{2}\/\d{4})/,
+      echeance: (p, texte) => { const d = D((texte.match(/Date\s*:\s*:\s*(\d{2}\/\d{2}\/\d{4})/) || [])[1]); const j = +(texte.match(/Cond\. pmt\s*:\s*:\s*(\d+)\s*jours/i) || [])[1]; return d && j ? addDaysIso(d, j) : ''; },
+      ttc: /A PAYER\s+([\d.]*\d,\d{2})\s*EUR/,
+      ht: (p, texte) => { const m = texte.match(/^Total\s{2,}([\d.]*\d,\d{2})\s{2,}([\d.]*\d,\d{2})\s{2,}([\d.]*\d,\d{2})/m); return m ? M(m[2]) : null; },
+      tvaMontant: (p, texte) => { const m = texte.match(/^Total\s{2,}([\d.]*\d,\d{2})\s{2,}([\d.]*\d,\d{2})\s{2,}([\d.]*\d,\d{2})/m); return m ? M(m[3]) : null; },
+      tvaDetail: (pages) => toutes(pages).map(t => t.match(/^\w+\s{2,}(\d+,\d{2})%\s{2,}([\d.]*\d,\d{2})\s{2,}([\d.]*\d,\d{2})\s{2,}([\d.]*\d,\d{2})/)).filter(Boolean).map(m => ({ taux: M(m[1]), base: M(m[3]), montant: M(m[4]) })),
+      lignes: (pages) => lignesPar(pages, /^(\d{1,3})\s{2,}(\d{5,7})\s+(.+?)\s{2,}(\d+)\s{2,}(?:([\d.]*\d,\d{2,3})\s{2,})?(\d+,\d{2})\/(\w+)\s{2,}(-?[\d.]*\d,\d{2})/, (m) => ({ ref: m[2], designation: m[3].trim(), qte: m[5] ? M(m[5]) : M(m[4]), unite: m[7] === 'kg' ? 'kg' : 'pièce', colis: M(m[4]), pu: M(m[6]), montant: M(m[8]) }))
+    },
+
+    /* ---------- PM Food (Pologne) ---------- */
+    pmfood: {
+      nom: 'PM Food', email: /pmfood\.pl$/i, texte: /PM FOOD SP/i,
+      numero: /Faktura VAT[^\n]*?(FS \d+\/\d+\/\d{4})/i, date: /Data wystawienia\s+(\d{2}-\d{2}-\d{4})/, echeance: /do dnia\s+(\d{2}-\d{2}-\d{4})/,
+      ttc: /Razem do zap[łl]aty:\s*([\d  ]+,\d{2})\s*EUR/,
+      tvaMontant: () => 0,
+      ht: (p, texte) => M((texte.match(/Razem do zap[łl]aty:\s*([\d  ]+,\d{2})\s*EUR/) || [])[1]),
+      tvaDetail: (p, texte) => { const t = M((texte.match(/Razem do zap[łl]aty:\s*([\d  ]+,\d{2})\s*EUR/) || [])[1]); return t != null ? [{ taux: 0, base: t, montant: 0 }] : []; },
+      lignes: (pages) => lignesPar(pages, /^(\d{1,3})\s{2,}(\d[\d ]*,\d{3})\s*(kg|szt|op)\s{2,}(\d+,\d{2,3})\s{2,}(\d+)\s{2,}(\d[\d ]*,\d{2})\s{2,}(\d[\d ]*,\d{2})\s{2,}(\d[\d ]*,\d{2})$/, (m, t, L, i) => ({ ref: '', designation: (L[i - 1] || '').trim(), qte: M(m[2]), unite: m[3] === 'kg' ? 'kg' : 'pièce', pu: M(m[4]), montant: M(m[6]) }))
+    },
+
+    /* ---------- Factures Odoo (Zaka Food, Barcelona LED) ---------- */
+    zakafood: odoo('Zaka Food', /zaka-food\.odoo\.com$|zakafood/i, /ZAKA FOOD|Zaka Food/),
+    bcnled: odoo('Barcelona LED', /bcnled\.com$/i, /Barcelona LED/i),
+
+    /* ---------- Gallinis (Belgique, charcuterie volaille) ---------- */
+    gallinis: {
+      nom: 'Gallinis', email: /gallinis\.be$/i, texte: /GALLINIS/,
+      numero: /FACTURE:\s*(\d+)/, date: /Date:\s*(\d{2}\/\d{2}\/\d{4})/, echeance: /Date d'expiration:\s*(\d{2}\/\d{2}\/\d{4})/,
+      ht: /Total excl\. TVA:\s*€\s*([\d.]*\d,\d{2})/, tvaMontant: /\d\s{2,}TVA:\s*€\s*([\d.]*\d,\d{2})/, ttc: /TOTAL [ÀA] PAYER\s*€\s*([\d.]*\d,\d{2})/, htMarchandise: /Total marchandises:\s*€\s*([\d.]*\d,\d{2})/,
+      tvaDetail: (pages) => toutes(pages).map(t => t.match(/^([\d.]*\d,\d{2})\s{2,}(\d+)\s{2,}([\d.]*\d,\d{2})(?:\s|$)/)).filter(Boolean).map(m => ({ base: M(m[1]), taux: +m[2], montant: M(m[3]) })).filter(x => x.base > 0),
+      lignes: (pages) => lignesPar(pages, /^(\d{3,6})\s+(.+?)\s{2,}(\d+)\s{2,}(\d+,\d{3})\s{2,}(\d+,\d{2})\s*\/(kg|st)\s{2,}(?:[\d,]+\s{2,})?(-?[\d.]*\d,\d{2})$/, (m) => ({ ref: m[1], designation: m[2].trim(), qte: m[6] === 'kg' ? M(m[4]) : +m[3], unite: m[6] === 'kg' ? 'kg' : 'pièce', colis: +m[3], pu: M(m[5]), montant: M(m[7]) }))
+    },
+
+    /* ---------- Galline Frais (œufs) ---------- */
+    gallinefrais: {
+      nom: 'Galline Frais', email: /galline-frais\.fr$/i, texte: /GALLINE FRAIS/,
+      numero: /FACTURE n[°º]\s*(\d+)/i, date: /Date de facture\s*:\s*(\d{2}\/\d{2}\/\d{4})/, echeance: /Date d'[ée]ch[ée]ance\s*:\s*(\d{2}\/\d{2}\/\d{4})/,
+      ht: /Total Hors Taxes\s+([\d ]*\d,\d{2})/, ttc: /TTC\s*:\s*([\d ]*\d,\d{2})\s*EUR/,
+      tvaDetail: (p, texte) => { const t = texte.split('\n'); const i = t.findIndex(l => /Base H\.T\.\s+Code\s+Taux/.test(l)); if (i < 0) return []; const out = []; for (let j = i + 1; j < i + 4 && j < t.length; j++) { const m = t[j].match(/^([\d ]*\d,\d{2})\s{2,}\d\s{2,}(\d+,\d{2})\s{2,}([\d ]*\d,\d{2})$/); if (m) out.push({ base: M(m[1]), taux: M(m[2]), montant: M(m[3]) }); } return out; },
+      tvaMontant: (pages) => { const d = GABARITS.gallinefrais.tvaDetail(pages, FactEngine.texteDe(pages)); return d.length ? somme(d, 'montant') : null; },
+      lignes: (pages) => lignesPar(pages, /^([A-Z0-9]{6,})\s{2,}(\d+,\d{3})\s+([A-Z]{1,3})\s{2,}(.+?)\s{2,}(\d+\.\d{2,4})\s{2,}(-?[\d ]*\d,\d{2})\s*\d?$/, (m) => ({ ref: m[1], designation: m[4].trim(), qte: M(m[2]), unite: m[3], pu: M(m[5]), montant: M(m[6]) }))
+    },
+
+    /* ---------- Dupont (Belgique, emballages) ---------- */
+    dupont: {
+      nom: 'Dupont', email: /dupont\.be$/i, texte: /Dupont NV/,
+      numero: /^\d{2}-\d{2}-\d{2}\s{2,}\d{2}-\d{2}-\d{2}\s{2,}(VF\/\S+)/m,
+      date: /^\d{2}-\d{2}-\d{2}\s{2,}(\d{2}-\d{2}-\d{2})\s{2,}VF\//m,
+      echeance: /^(\d{2}-\d{2}-\d{2})\s{2,}\d{2}-\d{2}-\d{2}\s{2,}VF\//m,
+      ttc: /Total TTC\s+([\d.]*\d,\d{2})\s*EUR/,
+      tvaMontant: (p, texte) => { const v = [...texte.matchAll(/^(\d+)%\s+([\d.]*\d,\d{2})\s*$/gm)].map(m => M(m[2])); return v.length ? r2(v.reduce((a, b) => a + b, 0)) : null; },
+      ht: (p, texte) => { const ttc = M((texte.match(/Total TTC\s+([\d.]*\d,\d{2})\s*EUR/) || [])[1]); const v = [...texte.matchAll(/^(\d+)%\s+([\d.]*\d,\d{2})\s*$/gm)].map(m => M(m[2])); return ttc != null ? r2(ttc - v.reduce((a, b) => a + b, 0)) : null; },
+      statut: (p, texte) => /à payer\s+0,00\s*EUR/i.test(texte) ? 'payee' : '',
+      lignes: (pages) => lignesPar(pages, /^([A-Z]\d{8})\s{2,}(.+?)\s{2,}([\d.]+(?:,\d+)?)\s+(PIÈCE|PIECE|KG|ROL|PCE|U)\s{2,}(\d+,\d+)\s{2,}(-?[\d.]*\d,\d{2})$/, (m) => { const pu = M(m[5]), mt = M(m[6]); const q = qteCoherente(M(m[3]), pu, mt); return { ref: m[1], designation: m[2].trim(), qte: q, unite: /KG/.test(m[4]) ? 'kg' : 'pièce', pu, montant: mt }; })
+    },
+
+    /* ---------- Le Conte (pommes de terre, MIN) ---------- */
+    leconte: {
+      nom: 'Le Conte', email: /lecontesas\.fr$/i, texte: /pomme de terre de consommation/i,
+      numero: /FACTURE\s+N\S?\s*(FA\d+)/i, date: /^(\d{2}\/\d{2}\/\d{2,4})\s{2,}FA\d+/m,
+      ht: /HT Total\s+([\d ]*\d,\d{2})/, ttc: /TOTAL TTC\s+([\d ]*\d,\d{2})/, htMarchandise: /HT Marchandises\s+([\d ]*\d,\d{2})/,
+      tvaDetail: (p, texte) => [...texte.matchAll(/^TVA (\d+[.,]\d+) %\s+([\d ]*\d,\d{2})/gm)].map(m => ({ taux: M(m[1]), base: null, montant: M(m[2]) })),
+      tvaMontant: (p, texte) => { const v = [...texte.matchAll(/^TVA (\d+[.,]\d+) %\s+([\d ]*\d,\d{2})/gm)].map(m => M(m[2])); return v.length ? r2(v.reduce((a, b) => a + b, 0)) : null; },
+      lignes: (pages) => lignesPar(pages, /^(\d{6})\s+(.+?)\s{2,}\d.*?\s(\d+,\d{2})\s{2,}(\d+,\d{2})\s([KPU])\s{2,}(-?\d[\d ]*,\d{2})$/, (m) => ({ ref: m[1], designation: m[2].trim(), qte: M(m[3]), unite: m[5] === 'K' ? 'kg' : 'pièce', pu: M(m[4]), montant: M(m[6]) }))
+    },
+
+    /* ---------- Fournisseurs hors marchandise ---------- */
+    hexagonia: {
+      nom: 'Hexagonia', texte: /Facture\s+Hexagonia/,
+      numero: /Num[ée]ro de facture\s+(\S+)/, date: /Date d'[ée]mission\s+(\d{1,2}\s+\S+\s+\d{4})/, echeance: /Date d'[ée]ch[ée]ance\s+(\d{1,2}\s+\S+\s+\d{4})/,
+      ht: /Total hors taxes\s+([\d  ]*\d,\d{2})\s*€/, tvaMontant: /^TVA[^\n]*?€-?\s{2,}([\d  ]*\d,\d{2})\s*€/m, ttc: /^Total\s+([\d  ]*\d,\d{2})\s*€/m,
+      tvaDetail: (p, texte) => { const m = texte.match(/^TVA\D*(\d+)\s*% de ([\d  ]*\d,\d{2})\s*€-?\s{2,}([\d  ]*\d,\d{2})/m); return m ? [{ taux: +m[1], base: M(m[2]), montant: M(m[3]) }] : []; },
+      statut: (p, texte) => /PAY[ÉE]E/.test(texte) ? 'payee' : ''
+    },
+    anthropic: {
+      nom: 'Anthropic (Claude)', texte: /Anthropic/,
+      numero: /Invoice number\s+(\S+)/, date: /(?:Date of issue|Date paid)\s+([A-Za-z]+ \d{1,2}, \d{4})/, echeance: /Date due\s+([A-Za-z]+ \d{1,2}, \d{4})/,
+      ht: /Total excluding tax\s+€([\d.,]+)/, tvaMontant: /VAT[^\n]*?\s{2,}€([\d.,]+)/, ttc: /^Total\s+€([\d.,]+)/m,
+      tvaDetail: (p, texte) => { const m = texte.match(/VAT\D*(\d+)% on €([\d.,]+)-?\s{2,}€([\d.,]+)/); return m ? [{ taux: +m[1], base: M(m[2]), montant: M(m[3]) }] : []; },
+      statut: (p, texte) => /Amount paid|Receipt number/.test(texte) ? 'payee' : ''
+    },
+    strageco: {
+      nom: 'Strageco (comptable)', email: /strageco\.fr$/i, texte: /R[ée]f[ée]rence [àa] rappeler : CDBHVA/,
+      numero: /Facture N[°º]\s*(\d+)/, date: /LENS, le\s+(\d{1,2}\s+\S+\s+\d{4})/i,
+      ht: /Base H\.T\.\s*(\d[\d  ]*,\d{2})/, tvaMontant: /Montant T\.V\.A\.\s*(\d[\d  ]*,\d{2})/, ttc: /Total [àa] payer en Euros\s+(\d[\d  ]*,\d{2})/,
+      tvaDetail: (p, texte) => { const m = texte.match(/Base H\.T\.\s*(\d[\d  ]*,\d{2})\s+Taux\s*(\d+[.,]\d+)\s+Montant T\.V\.A\.\s*(\d[\d  ]*,\d{2})/); return m ? [{ base: M(m[1]), taux: M(m[2]), montant: M(m[3]) }] : []; }
+    },
+    iabako: {
+      nom: (pages, texte) => { const L = texte.split('\n'); const i = L.findIndex(l => /^Exp[ée]diteur\s+Destinataire/.test(l)); return i >= 0 ? cols(L[i + 1] || '')[0] : ''; }, nomDefaut: 'Fournisseur (iabako)',
+      email: /iabako\.com$/i, texte: /Date de génération/,
+      numero: /Facture N[°º]\s*:\s*(\d+)/, date: /Date de facture\s*:\s*(\d{2}\/\d{2}\/\d{4})/,
+      ht: { ligne: /^Total HT\s/ }, tvaMontant: (p, texte) => { const v = [...texte.matchAll(/^TVA \d+[.,]\d+%\s+([\d ]*\d,\d{2})\s*EUR/gm)].map(m => M(m[1])); return v.length ? r2(v.reduce((a, b) => a + b, 0)) : null; }, ttc: { ligne: /^Total TTC/ },
+      tvaDetail: (p, texte) => [...texte.matchAll(/^TVA (\d+[.,]\d+)%\s+([\d ]*\d,\d{2})\s*EUR/gm)].map(m => ({ taux: M(m[1]), base: null, montant: M(m[2]) }))
+    },
+    restoflash: {
+      nom: 'RestoFlash', email: /restoflash\.fr$/i, texte: /RestoFlash|Resto Flash/i,
+      numero: /Num[ée]ro de facture\s*:\s*(\S+)/, date: /Date de facture\s*:\s*(\d{2}\/\d{2}\/\d{4})/,
+      ht: /Total HT\s+([\d.,]+)\s*€/, tvaMontant: /^TVA\s+[\d.,]+\s*%\s+([\d.,]+)\s*€/m, ttc: /Total TTC\s+([\d.,]+)\s*€/,
+      tvaDetail: (p, texte) => { const m = texte.match(/^TVA\s+([\d.,]+)\s*%\s+([\d.,]+)\s*€/m); const ht = M((texte.match(/Total HT\s+([\d.,]+)\s*€/) || [])[1]); return m ? [{ taux: M(m[1]), base: ht, montant: M(m[2]) }] : []; },
+      statut: (p, texte) => /Mode de règlement : Prélèvement/.test(texte) ? 'payee' : ''
+    }
+  };
+
+  function odoo(nom, email, texte) {
+    return {
+      nom, email, texte,
+      numero: /Facture\s+(INV\/\d{4}\/\d+)/,
+      date: /^(\d{2}\/\d{2}\/\d{4})\s{2,}\d{2}\/\d{2}\/\d{4}/m,
+      echeance: /^\d{2}\/\d{2}\/\d{4}\s{2,}(\d{2}\/\d{2}\/\d{4})/m,
+      ht: /Montant hors taxes\s+([\d  .]*\d,\d{2})\s*€/,
+      tvaMontant: (p, t) => { const v = [...t.matchAll(/^TVA [\d.,]+\s*%\s+([\d  .]*\d,\d{2})\s*€/gm)].map(m => M(m[1])); if (v.length) return r2(v.reduce((a, b) => a + b, 0)); const ht = M((t.match(/Montant hors taxes\s+([\d  .]*\d,\d{2})/) || [])[1]); const tt = M((t.match(/\bTotal\s+([\d  .]*\d,\d{2})\s*€\s*$/m) || [])[1]); return ht != null && tt != null ? r2(tt - ht) : null; },
+      ttc: /\bTotal\s+([\d  .]*\d,\d{2})\s*€\s*$/m,
+      tvaDetail: (p, t) => [...t.matchAll(/^TVA ([\d.,]+)\s*%\s+([\d  .]*\d,\d{2})\s*€/gm)].map(m => ({ taux: M(m[1]), base: null, montant: M(m[2]) })),
+      statut: (p, t) => /Montant dû\s+0,00\s*€/.test(t) ? 'payee' : '',
+      lignes: (pages) => lignesPar(pages, /^(.+?)\s{2,}(\d+,\d{2})\s{2,}(\d+,\d{2,4})\s{2,}(?:[\d,]+\s{2,})?(\d+)%\s{2,}(-?[\d  .]*\d,\d{2})\s*€$/, (m) => ({ ref: '', designation: m[1].trim(), qte: M(m[2]), unite: 'pièce', pu: M(m[3]), montant: M(m[5]) }))
+    };
+  }
+  function addDaysIso(iso, n) { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+})();
 if (typeof module !== 'undefined') module.exports = { GABARITS, GABARITS_VERSION };
 /* ===================== Factures : PDF, lecture automatique, doublons =====================
    - Les PDF arrivent par le robot Gmail (source « mail ») ou par le bouton « Ajouter des PDF » (source « scan »).
@@ -2854,10 +3052,12 @@ async function lireFacture(f) {
   const lib = await chargerPdfJs();
   const octets = await FactPdf.get(f);
   const pages = await FactEngine.lirePdf(lib, octets.slice());
-  const r = FactEngine.lire(GABARITS, pages, { email: f.mail && f.mail.email, sujet: f.mail && f.mail.sujet });
+  const r = FactEngine.lire(GABARITS, pages, { email: f.mail && f.mail.email, sujet: f.mail && f.mail.sujet, nom: f.pdf && f.pdf.nom });
+  if (r.lu === 'ignore') { await FactPdf.remove(f); await Store.remove('factures', f.id); return; }   // ex. conditions générales jointes au mail
   const patch = { lu: r.lu, luLe: new Date().toISOString(), luVersion: GABARITS_VERSION };
   for (const k of ['numero', 'date', 'echeance', 'fournisseur', 'gabarit', 'type']) if (r[k]) patch[k] = r[k];
-  for (const k of ['ht', 'ttc', 'tvaMontant', 'tva']) if (r[k] != null) patch[k] = r[k];
+  for (const k of ['ht', 'ttc', 'tvaMontant', 'tva', 'htMarchandise']) if (r[k] != null) patch[k] = r[k];
+  if (r.statut === 'payee' && f.statut !== 'payee') { patch.statut = 'payee'; patch.payeeLe = r.date || todayStr(); }
   if (r.tvaDetail && r.tvaDetail.length) patch.tvaDetail = r.tvaDetail;
   if (r.lignes && r.lignes.length) { patch.lignes = r.lignes.slice(0, 200); patch.lignesOk = !!r.lignesOk; }
   if (r.note) patch.luNote = r.note;

@@ -103,7 +103,8 @@ function traiterMessage_(msg) {
   const email = ((de.match(/<([^>]+)>/) || [null, de])[1] || '').trim().toLowerCase();
   if (email === Session.getActiveUser().getEmail().toLowerCase()) return 0;
   const pdfs = msg.getAttachments({ includeInlineImages: false })
-    .filter(a => a.getContentType() === 'application/pdf' || /\.pdf$/i.test(a.getName()));
+    .filter(a => a.getContentType() === 'application/pdf' || /\.pdf$/i.test(a.getName()))
+    .filter(a => !/conditions|cgv|catalogue|tarif|promotion/i.test(a.getName()));   // pas les conditions générales jointes
   let n = 0;
   pdfs.forEach(a => {
     const octets = a.getBytes();
