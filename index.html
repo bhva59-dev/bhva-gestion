@@ -2693,7 +2693,7 @@ const FactEngine = (() => {
 
   /* ---------- lecture générique (fournisseur inconnu) ---------- */
   const GEN = {
-    numero: [/(?:facture|invoice|factuur)\s*(?:n[°ºo]\.?|num(?:[ée]ro)?\.?|no\.?|nr\.?|number|#)\s*:?\s*([A-Z0-9][A-Z0-9\/\-._]{2,})/i, /(?:n[°º]|num[ée]ro)\s*(?:de\s*)?(?:facture|pi[eè]ce)\s*:?\s*([A-Z0-9][A-Z0-9\/\-._]{2,})/i, /\b(?:INV|FA|FAC|F)[\/\-]?\d{2,4}[\/\-]\d{2,6}\b/],
+    numero: [/(?:facture|invoice|factuur)\s*(?:n[°ºo]\.?|num(?:[ée]ro)?\.?|no\.?|nr\.?|number|#)\s*:?\s*([A-Z0-9][A-Z0-9\/\-._]{2,})/i, /\bFacture\s+((?:FC|FA|FS|F)\s?[A-Z]*\d{4,})/i, /(?:n[°º]|num[ée]ro)\s*(?:de\s*)?(?:facture|pi[eè]ce)\s*:?\s*([A-Z0-9][A-Z0-9\/\-._]{2,})/i, /\b(?:INV|FA|FAC|F)[\/\-]?\d{2,4}[\/\-]\d{2,6}\b/],
     date: [/date\s*(?:de\s*)?(?:la\s*)?(?:facture|facturation|d'?[ée]mission|document)?\s*:?\s*(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})/i, /(?:du|le)\s*(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})/i],
     echeance: [/(?:[ée]ch[ée]ance|date\s*limite|date\s*de\s*paiement|due\s*date|vervaldatum|payable\s*le)\s*:?\s*(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})/i],
     ttc: /(net\s*[àa]\s*payer|total\s*t\.?t\.?c\.?|montant\s*t\.?t\.?c\.?|total\s*[àa]\s*payer|reste\s*[àa]\s*payer|amount\s*due|total\s*due|te\s*betalen|total\s*incl)/i,
@@ -2743,10 +2743,28 @@ const FactEngine = (() => {
     return null;
   }
 
+  /* ---------- est-ce bien une facture ? (relevés, relances, tarifs, BL… sont écartés) ---------- */
+  const RE_FICHIER_PAS_FACTURE = /relance|rappel|extrait.?(?:de.?)?compte|relev[ée]|grands?.?livres?|\brib\b|conf_client|conditions|cgv|catalogue|tarif|mercuriale|cours/i;
+  const RE_FICHIER_FACTURE = /fact|invoice|avoir|^F[ACS]?[ _-]?\d|^FC\b|^FA\b/i;
+  function nature(texte, info = {}) {
+    const nom = String(info.nom || ''), sujet = String(info.sujet || '');
+    const haut = texte.split('\n').slice(0, 18).join('\n');
+    if (RE_FICHIER_PAS_FACTURE.test(nom) && !RE_FICHIER_FACTURE.test(nom)) return 'autre';
+    if (/N[°º] b\.l\.\s*\.\s*\.\s*:|TARIF A TITRE INDICATIF, FACTURE FAISANT FOI/i.test(texte.slice(0, 3000))) return 'bl';
+    if (/cours du veau|cours veau|communiquons les cours|mercuriale|liste de prix|prix de la semaine/i.test(haut)) return 'tarif';
+    if (/EXTRAIT DE COMPTE|RELEV[ÉE] DE (?:COMPTE|FACTURES)|SITUATION DE (?:VOTRE )?COMPTE|REKENINGUITTREKSEL|GRANDS? LIVRES?|RELEV[ÉE]S? D'IDENTIT[ÉE] BANCAIRE|Confirmation du jour/i.test(haut)) return 'releve';
+    if (/^\s*(?:\d+\s*(?:[èe]me|e|ère)\s+)?(?:RELANCE|RAPPEL|MISE EN DEMEURE|AANMANING|HERINNERING)\b/im.test(haut)) return 'relance';
+    if (/\b(?:rappel|relance|mise en demeure)\b/i.test(sujet) && !RE_FICHIER_FACTURE.test(nom)) return 'relance';
+    if (/^\s*(?:DEVIS|BON DE COMMANDE|PRO ?FORMA)\b/im.test(haut)) return 'commande';
+    return 'facture';
+  }
+  const NATURE_LIBELLE = { autre: 'pas une facture', bl: 'bon de livraison', tarif: 'liste de prix', releve: 'relevé de compte', relance: 'relance / rappel', commande: 'devis ou commande' };
+
   /* ---------- lecture complète ---------- */
   function lire(gabarits, pages, info = {}) {
     const texte = texteDe(pages);
-    if (info.nom && /conditions|cgv|catalogue|tarif|promotion/i.test(info.nom) && !/factur|invoice/i.test(texte.slice(0, 600))) return { lu: 'ignore', note: 'Pas une facture' };
+    const nat = nature(texte, info);
+    if (nat !== 'facture') return { lu: 'ignore', nature: nat, note: NATURE_LIBELLE[nat] || 'pas une facture' };
     const vide = texte.replace(/\s/g, '').length < 30;
     if (vide) return { lu: 'scan', texte: '', note: 'PDF scanné sans texte' };
     const cle = reconnaitre(gabarits, info.email || '', texte);
@@ -2779,7 +2797,7 @@ const FactEngine = (() => {
     return r;
   }
 
-  return { montant, montants, dateIso, lirePdf, grouper, texteDe, cols, lire, generique, reconnaitre, outils };
+  return { montant, montants, dateIso, lirePdf, grouper, texteDe, cols, lire, generique, reconnaitre, nature, outils };
 })();
 if (typeof module !== 'undefined') module.exports = FactEngine;
 /* ===================== Gabarits des fournisseurs =====================
@@ -2787,7 +2805,7 @@ if (typeof module !== 'undefined') module.exports = FactEngine;
    où lire le numéro, la date, l'échéance, le total HT, la TVA (taux et montants), le TTC et les lignes.
    Quand on améliore un gabarit, on augmente GABARITS_VERSION : l'appli relit alors toute seule
    les factures déjà importées (sauf celles corrigées à la main). */
-const GABARITS_VERSION = 3;
+const GABARITS_VERSION = 4;
 const GABARITS = (() => {
   const M = FactEngine.montant, MS = FactEngine.montants, D = FactEngine.dateIso, cols = FactEngine.cols;
   const TAUX = [2.1, 5.5, 6, 10, 20, 21, 0];
@@ -2895,7 +2913,7 @@ const GABARITS = (() => {
     /* ---------- Galline Frais (œufs) ---------- */
     gallinefrais: {
       nom: 'Galline Frais', email: /galline-frais\.fr$/i, texte: /GALLINE FRAIS/,
-      numero: /FACTURE n[°º]\s*(\d+)/i, date: /Date de facture\s*:\s*(\d{2}\/\d{2}\/\d{4})/, echeance: /Date d'[ée]ch[ée]ance\s*:\s*(\d{2}\/\d{2}\/\d{4})/,
+      numero: /(?:FACTURE|AVOIR)\s*n[°º]\s*(\d+)/i, date: /Date de facture\s*:\s*(\d{2}\/\d{2}\/\d{4})/, echeance: /Date d'[ée]ch[ée]ance\s*:\s*(\d{2}\/\d{2}\/\d{4})/,
       ht: /Total Hors Taxes\s+([\d ]*\d,\d{2})/, ttc: /TTC\s*:\s*([\d ]*\d,\d{2})\s*EUR/,
       tvaDetail: (p, texte) => { const t = texte.split('\n'); const i = t.findIndex(l => /Base H\.T\.\s+Code\s+Taux/.test(l)); if (i < 0) return []; const out = []; for (let j = i + 1; j < i + 4 && j < t.length; j++) { const m = t[j].match(/^([\d ]*\d,\d{2})\s{2,}\d\s{2,}(\d+,\d{2})\s{2,}([\d ]*\d,\d{2})$/); if (m) out.push({ base: M(m[1]), taux: M(m[2]), montant: M(m[3]) }); } return out; },
       tvaMontant: (pages) => { const d = GABARITS.gallinefrais.tvaDetail(pages, FactEngine.texteDe(pages)); return d.length ? somme(d, 'montant') : null; },
@@ -2923,6 +2941,34 @@ const GABARITS = (() => {
       tvaDetail: (p, texte) => [...texte.matchAll(/^TVA (\d+[.,]\d+) %\s+([\d ]*\d,\d{2})/gm)].map(m => ({ taux: M(m[1]), base: null, montant: M(m[2]) })),
       tvaMontant: (p, texte) => { const v = [...texte.matchAll(/^TVA (\d+[.,]\d+) %\s+([\d ]*\d,\d{2})/gm)].map(m => M(m[2])); return v.length ? r2(v.reduce((a, b) => a + b, 0)) : null; },
       lignes: (pages) => lignesPar(pages, /^(\d{6})\s+(.+?)\s{2,}\d.*?\s(\d+,\d{2})\s{2,}(\d+,\d{2})\s([KPU])\s{2,}(-?\d[\d ]*,\d{2})$/, (m) => ({ ref: m[1], designation: m[2].trim(), qte: M(m[3]), unite: m[5] === 'K' ? 'kg' : 'pièce', pu: M(m[4]), montant: M(m[6]) }))
+    },
+
+    /* ---------- LDC / Lionor (volaille) — facture dématérialisée ---------- */
+    ldc: {
+      nom: 'LDC (Lionor)', email: /ldc\.fr$/i, texte: /LIONOR|FR58305507303/,
+      numero: /N[°º] Fact\s+(\d+)/, date: /^Date\s+(\d{2}\/\d{2}\/\d{2})\s+N[°º] Fact/m, echeance: /NET le\s+(\d{2}\/\d{2}\/\d{2})/,
+      ht: /TOT HT\s+([\d ]*\d,\d{2})/, tvaMontant: /TOT TVA\s+([\d ]*\d,\d{2})/, ttc: /%\s{2,}[\d ]*\d,\d{2}\s{2,}([\d ]*\d,\d{2})\s*EUR/,
+      tvaDetail: (p, t) => [...t.matchAll(/(\d[\d ]*,\d{2})\s+\d\s{2,}(\d+,\d{2})%\s{2,}(\d[\d ]*,\d{2})/g)].map(m => ({ base: M(m[1]), taux: M(m[2]), montant: M(m[3]) })),
+      lignes: (pages) => lignesPar(pages, /^(\d{4})\s{2,}(\d{6})\s{2,}(.+?)\s{2,}(\d{13})\s{2,}(-?\d+)\s+(-?\d+,\d{3})\s{2,}([KUP])\s{2,}(\d+,\d{3})\s*[#*]?\s{2,}(-?\d[\d ]*,\d{2})/, (m) => ({ ref: m[2], ean: m[4], designation: m[3].trim(), qte: m[7] === 'K' ? M(m[6]) : +m[5], unite: m[7] === 'K' ? 'kg' : 'pièce', colis: +m[5], pu: M(m[8]), montant: M(m[9]) }))
+    },
+
+    /* ---------- Matanza (Belgique, viande) ---------- */
+    matanza: {
+      nom: 'Matanza', email: /matanza\.be$/i, texte: /FASN-\d+[\s\S]*Total [àa] payer \[EUR\]/,
+      numero: /N[°º] document:\s+(FASN-\d+)/, date: /Date de facture:\s+(\d{2}-\d{2}-\d{4})/, echeance: /Date d'expiration:\s+(\d{2}-\d{2}-\d{4})/,
+      ht: /Base totale de TVA:\s*(-?[\d.]*\d,\d{2})/, tvaMontant: /TVA totale:\s*(-?[\d.]*\d,\d{2})/, ttc: /Total [àa] payer \[EUR\]\s*:\s*(-?[\d.]*\d,\d{2})/, htMarchandise: /Biens et services nets:\s*(-?[\d.]*\d,\d{2})/,
+      tvaDetail: (p, t) => { const par = {}; for (const m of t.matchAll(/^(\d+[.,]\d)%\s{2,}(-?[\d.]*\d,\d{2})\s{2,}(-?[\d.]*\d,\d{2})$/gm)) { const k = M(m[1]); const o = par[k] || (par[k] = { taux: k, base: 0, montant: 0 }); o.base = r2(o.base + M(m[2])); o.montant = r2(o.montant + M(m[3])); } return Object.values(par); },
+      lignes: (pages) => lignesPar(pages, /^(\d\.\d{3})\s{2,}(.+?)\s{2,}(-?[\d.]*\d,\d{2})\s{2,}(-?[\d.]*\d,\d{2})(?:\s{2,}(-?[\d.]*\d,\d{2}))?\s{2,}(\d+,\d{3})\/(\w+)\s{2,}(\d+)%\s{2,}(-?[\d.]*\d,\d{2})$/, (m) => ({ ref: m[1], designation: m[2].trim(), qte: /kg/i.test(m[7]) ? M(m[4]) : M(m[3]), unite: /kg/i.test(m[7]) ? 'kg' : 'pièce', colis: M(m[3]), pu: M(m[6]), montant: M(m[9]) }))
+    },
+
+    /* ---------- Omer Ameloot & Zonen (Belgique, viande) ---------- */
+    ameloot: {
+      nom: 'Ameloot', email: /ameloot\.org$/i, texte: /Ameloot/i,
+      numero: /^\d{2}\/\d{2}\/\d{4}\s{2,}\d+\s{2,}(FACT-\d+)/m, date: /^(\d{2}\/\d{2}\/\d{4})\s{2,}\d+\s{2,}FACT-\d+/m,
+      echeance: /^(\d{2}\/\d{2}\/\d{4})\s{2,}€\s*-?[\d.]*\d,\d{2}\s*$/m, ttc: /^\d{2}\/\d{2}\/\d{4}\s{2,}€\s*(-?[\d.]*\d,\d{2})\s*$/m,
+      ht: /Totaux\s{2,}€\s*(-?[\d.]*\d,\d{2})/, tvaMontant: /Totaux\s{2,}€\s*-?[\d.]*\d,\d{2}\s{2,}€\s*(-?[\d.]*\d,\d{2})/,
+      tvaDetail: (p, t) => [...t.matchAll(/^(\d+,\d{2})\s{2,}(-?[\d.]*\d,\d{2})\s{2,}(-?[\d.]*\d,\d{2})$/gm)].map(m => ({ taux: M(m[1]), base: M(m[2]), montant: M(m[3]) })),
+      lignes: (pages) => lignesPar(pages, /^(.+?)\s{2,}(-?[\d.]*\d(?:,\d{1,3})?)\s*(kg|st|pc|pce)\s{2,}(\d+,\d{3})\s{2,}(-?[\d.]*\d,\d{2})\s{2,}\d+$/, (m) => ({ ref: '', designation: m[1].trim(), qte: M(m[2]), unite: m[3] === 'kg' ? 'kg' : 'pièce', pu: M(m[4]), montant: M(m[5]) }))
     },
 
     /* ---------- Fournisseurs hors marchandise ---------- */
@@ -3054,7 +3100,11 @@ async function lireFacture(f) {
   const octets = await FactPdf.get(f);
   const pages = await FactEngine.lirePdf(lib, octets.slice());
   const r = FactEngine.lire(GABARITS, pages, { email: f.mail && f.mail.email, sujet: f.mail && f.mail.sujet, nom: f.pdf && f.pdf.nom });
-  if (r.lu === 'ignore') { await FactPdf.remove(f); await Store.remove('factures', f.id); return; }   // ex. conditions générales jointes au mail
+  if (r.lu === 'ignore') {   // relevé, relance, liste de prix, bon de livraison, conditions générales… : ce n'est pas une facture
+    await FactPdf.remove(f); await Store.remove('factures', f.id);
+    toast(`Retiré : ${f.fournisseur || 'document'} (${r.note || 'pas une facture'})`);
+    return;
+  }
   const patch = { lu: r.lu, luLe: new Date().toISOString(), luVersion: GABARITS_VERSION };
   for (const k of ['numero', 'date', 'echeance', 'fournisseur', 'gabarit', 'type']) if (r[k]) patch[k] = r[k];
   for (const k of ['ht', 'ttc', 'tvaMontant', 'tva', 'htMarchandise']) if (r[k] != null) patch[k] = r[k];

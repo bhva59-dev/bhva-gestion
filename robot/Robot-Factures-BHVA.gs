@@ -18,13 +18,18 @@
 const CONFIG = {
   HEURES: 5,                 // une vérification toutes les 5 heures
   JOURS_PREMIERE_FOIS: 60,   // à l'installation : factures des 60 derniers jours
-  JOURS_ENSUITE: 10,         // ensuite : on regarde les 10 derniers jours (rattrapage)
+  JOURS_ENSUITE: 60,         // ensuite : on regarde les 60 derniers jours (seuls les mails pas encore traités)
   LIBELLE: 'BHVA-importee',
   PROJET: 'bhva-gestion',
   CLE_API: 'AIzaSyAuEx9IUK0JdWXJeLgFj86IB0-KCdwaf4U', // clé publique de l'appli (déjà visible dans le site)
   MOTS: ['facture', 'factures', 'invoice', 'factuur', 'avoir', 'receipt', 'reçu', 'recu'],
   TAILLE_MORCEAU: 900000     // découpe des PDF pour la base (limite 1 Mo par fiche)
 };
+
+// Ce qui n'est PAS une facture : on ne l'importe pas (l'appli vérifie aussi le contenu du PDF).
+const PAS_FACTURE_SUJET = /\bBL NO\d+|COURS VEAU|Confirmation du jour|EXTRAIT DE COMPTE|grands? livres?/i;
+const PAS_FACTURE_FICHIER = /relance|rappel|extrait.?(?:de.?)?compte|relev[ée]|grands?.?livres?|\brib\b|conf_client|conditions|cgv|catalogue|tarif|mercuriale|cours/i;
+const FICHIER_FACTURE = /fact|invoice|avoir|^F[ACS]?[ _-]?\d|^FC\b|^FA\b/i;
 
 // Expéditeur (domaine) → nom du fournisseur affiché dans l'appli.
 const FOURNISSEURS = {
@@ -45,7 +50,10 @@ const FOURNISSEURS = {
   'bcnled.com': 'Barcelona LED',
   'strageco.fr': 'Strageco',
   'stripe.com': 'Stripe',
-  'iabako.com': 'iabako'
+  'iabako.com': 'iabako',
+  'ldc.fr': 'LDC (Lionor)',
+  'matanza.be': 'Matanza',
+  'ameloot.org': 'Ameloot'
 };
 
 /* ============ À lancer une fois ============ */
@@ -82,7 +90,8 @@ function importer_(jours) {
     const depuis = Object.keys(FOURNISSEURS).map(d => 'from:' + d).join(' OR ');
     const q = 'has:attachment filename:pdf newer_than:' + jours + 'd -label:' + CONFIG.LIBELLE +
       ' -from:me ((' + CONFIG.MOTS.join(' OR ') + ') OR ' + depuis + ')';
-    const fils = GmailApp.search(q, 0, 100);
+    const fils = [];
+    for (let debut = 0; debut < 1000; debut += 100) { const lot = GmailApp.search(q, debut, 100); fils.push.apply(fils, lot); if (lot.length < 100) break; }
     fils.forEach(fil => {
       let toutBon = true;
       fil.getMessages().forEach(msg => {
@@ -102,9 +111,12 @@ function traiterMessage_(msg) {
   const de = msg.getFrom();
   const email = ((de.match(/<([^>]+)>/) || [null, de])[1] || '').trim().toLowerCase();
   if (email === Session.getActiveUser().getEmail().toLowerCase()) return 0;
+  const sujet = msg.getSubject() || '';
+  if (PAS_FACTURE_SUJET.test(sujet)) return 0;                     // ex. bons de livraison et cours du veau Tendriade
   const pdfs = msg.getAttachments({ includeInlineImages: false })
     .filter(a => a.getContentType() === 'application/pdf' || /\.pdf$/i.test(a.getName()))
-    .filter(a => !/conditions|cgv|catalogue|tarif|promotion/i.test(a.getName()));   // pas les conditions générales jointes
+    .filter(a => !(PAS_FACTURE_FICHIER.test(a.getName()) && !FICHIER_FACTURE.test(a.getName())))   // relevés, relances, RIB, conditions…
+    .filter(a => !(/\b(rappel|relance|mise en demeure)\b/i.test(sujet) && !FICHIER_FACTURE.test(a.getName())));
   let n = 0;
   pdfs.forEach(a => {
     const octets = a.getBytes();
