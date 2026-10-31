@@ -2776,7 +2776,7 @@ const FactEngine = (() => {
     if (g) { r.gabarit = cle; if (typeof g.nom === 'string') r.fournisseur = g.nom; else if (!r.fournisseur && g.nomDefaut) r.fournisseur = g.nomDefaut; }
     // avoir (note de crédit)
     if (!r.type && (/^\s*(?:AVOIR|NOTE DE CR[EÉ]DIT|CREDIT NOTE)\b/im.test(texte) || (r.ttc != null && r.ttc < 0))) r.type = 'avoir';
-    if (r.type === 'avoir') for (const k of ['ht', 'tvaMontant', 'ttc', 'htMarchandise']) if (r[k] != null) r[k] = Math.abs(r[k]);
+    if (r.type === 'avoir') return { lu: 'ignore', nature: 'avoir', note: 'avoir (pas une facture)' };
     // compléter / contrôler les totaux
     if (r.ht == null && r.ttc != null && r.tvaMontant != null) r.ht = r2(r.ttc - r.tvaMontant - (r.consignes || 0));
     if (r.tvaMontant == null && r.ttc != null && r.ht != null) r.tvaMontant = r2(r.ttc - r.ht);
@@ -2806,7 +2806,7 @@ if (typeof module !== 'undefined') module.exports = FactEngine;
    où lire le numéro, la date, l'échéance, le total HT, la TVA (taux et montants), le TTC et les lignes.
    Quand on améliore un gabarit, on augmente GABARITS_VERSION : l'appli relit alors toute seule
    les factures déjà importées (sauf celles corrigées à la main). */
-const GABARITS_VERSION = 5;
+const GABARITS_VERSION = 6;
 const GABARITS = (() => {
   const M = FactEngine.montant, MS = FactEngine.montants, D = FactEngine.dateIso, cols = FactEngine.cols;
   const TAUX = [2.1, 5.5, 6, 10, 20, 21, 0];
@@ -3035,6 +3035,47 @@ const GABARITS = (() => {
   function addDaysIso(iso, n) { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
 })();
 if (typeof module !== 'undefined') module.exports = { GABARITS, GABARITS_VERSION };
+/* ===================== Les mails de factures (liste blanche) =====================
+   Établie le 31/10/2026 à partir des 305 mails avec PDF reçus depuis le 17/08/2026.
+   Une facture n'est prise QUE si le mail vient de cet expéditeur, avec cet objet, et que le PDF porte ce nom.
+   Tout le reste (relevés, relances, avoirs, bons de livraison, cours, devis, documents du comptable…) est ignoré. */
+const MAILS_FACTURES = [
+  { f: 'LDC (Lionor)', q: 'noreply.factures.demat@ldc.fr', de: /^noreply\.factures\.demat@ldc\.fr$/i, sujet: /^\[LIONOR\] : Piece comptable numero/i, pdf: /__S__INVOIC__\d+__\d+\.pdf$/i },
+  { f: 'Prim&Co', q: 'caisse@primandco.fr', de: /^caisse@primandco\.fr$/i, sujet: /^SAS PRIM&CO - FACTURE N/i, pdf: /^FAC_\d+\.pdf$/i },
+  { f: 'Le Conte', q: 'contact@lecontesas.fr', de: /^contact@lecontesas\.fr$/i, sujet: /^Votre facture num\S*ro FA\d+/i, pdf: /^Facture_FA\d+\.pdf$/i },
+  { f: 'Sud Fresh', q: 'laure.sudfresh@orange.fr', de: /^laure\.sudfresh@orange\.fr$/i, sujet: /^SUD FRESH - FACTURE N/i, pdf: /^facture_\d+\.pdf$/i },
+  { f: 'Lomme Primeurs', q: 'caisse@lomme-primeurs.com', de: /^caisse@lomme-primeurs\.com$/i, sujet: /^LOMME PRIMEURS - FACTURE N/i, pdf: /^facture_\d+\.pdf$/i },
+  { f: 'Tendriade', q: 'tendriade.fr', de: /^compta\.?client@tendriade\.fr$/i, sujet: /^Facture ou Avoir Tendriade invoicEDC_/i, pdf: /^invoicEDC_[\d_]+\.pdf$/i },
+  { f: 'Lagache', q: 'facturation@lagache-lomme.com', de: /^facturation@lagache-lomme\.com$/i, sujet: /^FACTURE N\S*\s*\d+\s*$/i, pdf: /^facture_\d+\.pdf$/i },
+  { f: 'Sital', q: 'compta@sital.fr', de: /^compta@sital\.fr$/i, sujet: /^SITAL SAS - FACTURES?\s*$/i, pdf: /^facture_\d+\.pdf$/i },
+  { f: 'Ameloot', q: 'factuur@ameloot.org', de: /^factuur@ameloot\.org$/i, sujet: /^Facture Omer Ameloot/i, pdf: /^FACT-\d+\.pdf$/i },
+  { f: 'Matanza', q: 'boekhouding@matanza.be', de: /^boekhouding@matanza\.be$/i, sujet: /^Facture Matanza avec r\S*f\S*rence FASN-/i, pdf: /^FASN-\d+\.pdf$/i },
+  { f: 'Galline Frais', q: 'contact@galline-frais.fr', de: /^contact@galline-frais\.fr$/i, sujet: /^FACTURE\s*$/i, pdf: /^ATT\d+\.pdf$/i },
+  { f: 'PM Food', q: 'pmfood.pl', de: /@pmfood\.pl$/i, sujet: /^(?:INVOICE|FS)\b/i, pdf: /^FS \d+_\d+_\d{4}\.pdf$/i },
+  { f: 'Leroy', q: 'caisse@etsleroy.com', de: /^caisse@etsleroy\.com$/i, sujet: /^Facture N\S*\s*\d/i, pdf: /^facture-\d+\.pdf$/i },
+  { f: 'Chicken Masters', q: 'chickenmasters.be', de: /@chickenmasters\.be$/i, sujet: /^F A C T U R E/i, pdf: /^BHVA - \d+\.pdf$/i },
+  { f: 'Zaka Food', q: 'notifications@zaka-food.odoo.com', de: /^notifications@zaka-food\.odoo\.com$/i, sujet: /Facture \(R\S*f INV\//i, pdf: /^INV_\d{4}_\d+\.pdf$/i },
+  { f: 'Gallinis', q: 'invoice@gallinis.be', de: /^invoice@gallinis\.be$/i, sujet: /^Facture Gallinis/i, pdf: /^FTGA-\d+\.pdf$/i },
+  { f: 'Dupont', q: 'boekhouding@dupont.be', de: /^boekhouding@dupont\.be$/i, sujet: /^Facture - VF\//i, pdf: /^Facture vente VF/i },
+  { f: 'Kriss Consult', q: 'steresiak@strageco.fr', de: /^steresiak@strageco\.fr$/i, sujet: /^Facture Kriss Consult n/i, pdf: /^BHVA Facture N/i },
+  { f: 'Strageco (comptable)', q: 'vbauzone@strageco.fr', de: /^vbauzone@strageco\.fr$/i, sujet: /^Facture Strageco n/i, pdf: /^BHVA Facture N/i },
+  { f: 'RestoFlash', q: 'info@restoflash.fr', de: /^info@restoflash\.fr$/i, sujet: /^Votre facture RestoFlash/i, pdf: /F\d+--.*\.pdf$/i },
+  { f: 'MAF Métallerie', q: 'notifications@iabako.com', de: /^notifications@iabako\.com$/i, sujet: /^Facture \d+ du/i, pdf: /^Facture_\d+\.pdf$/i },
+  { f: 'Anthropic (Claude)', q: 'stripe.com', de: /@stripe\.com$/i, sujet: /^Your receipt from Anthropic/i, pdf: /^Invoice-.*\.pdf$/i },
+  { f: 'Barcelona LED', q: 'invoice@bcnled.com', de: /^invoice@bcnled\.com$/i, sujet: /Facture \(R\S*f INV\//i, pdf: /^INV.\d+.\d+\.pdf$/i },
+  { f: 'Envie (SAV)', q: 'magasin.envie@envie.org', de: /^magasin\.envie@envie\.org$/i, sujet: /^Facture n/i, pdf: /^FACTURE_I\d+/i },
+  { f: 'Metro', q: 'no-reply@metro-marketplace.eu', de: /^no-reply@metro-marketplace\.eu$/i, sujet: /^Votre facture/i, pdf: /^IN-\d+\.pdf$/i },
+  { f: 'Shopify', q: 'billing@shopify.com', de: /^billing@shopify\.com$/i, sujet: /^Facture /i, pdf: /\.pdf$/i },
+  { f: 'Praninter', q: 'praninter.fr', de: /@praninter\.fr$/i, sujet: /Facture client N\S* FC/i, pdf: /^FC\d+\.pdf$/i },
+  { f: 'Seguard', q: 'seguard.fr', de: /@seguard\.fr$/i, sujet: /./, pdf: /^Facture_\d+_\d+\.pdf$/i },
+  { f: 'Hexagonia', q: 'adamibn.c@gmail.com', de: /^adamibn\.?c@gmail\.com$/i, sujet: /Hexagonia - (?:La|Ta) facture du/i, pdf: /^facture-[A-Z0-9]+-\d+\.pdf$/i }
+];
+function regleFacture(email, sujet) {
+  email = String(email || '').trim().toLowerCase(); sujet = String(sujet || '').trim();
+  for (const r of MAILS_FACTURES) if (r.de.test(email) && r.sujet.test(sujet)) return r;
+  return null;
+}
+function pdfFacture(regle, nom) { return !!regle && regle.pdf.test(String(nom || '').trim()); }
 /* ===================== Factures : PDF, lecture automatique, doublons =====================
    - Les PDF arrivent par le robot Gmail (source « mail ») ou par le bouton « Ajouter des PDF » (source « scan »).
    - Chaque PDF est rangé dans « factures_pdf » (morceaux), la fiche dans « factures ».
@@ -3091,6 +3132,7 @@ const FactLecture = {
   aLire: f => !!f && !!f.pdf && (f.lu === 'a_lire' || (!f.corrige && f.lu !== 'scan' && (f.luVersion || 0) < GABARITS_VERSION)),
   planifier() {
     if (!factEnLigne()) return;
+    nettoyerFactures();
     for (const f of Store.all('factures')) if (this.aLire(f) && !this.file.includes(f.id)) this.file.push(f.id);
     this.tourner();
   },
@@ -3105,7 +3147,23 @@ const FactLecture = {
     } finally { this.tourne = false; }
   }
 };
+/* Une fiche venue d'un mail n'est gardée que si le mail est un « mail de facture » reconnu (liste MAILS_FACTURES) */
+function factAutorisee(f) {
+  if (!f || f.source !== 'mail' || !f.mail) return true;            // PDF ajouté à la main : on le garde (contrôle du contenu ensuite)
+  const r = regleFacture(f.mail.email, f.mail.sujet);
+  return !!r && pdfFacture(r, f.pdf && f.pdf.nom);
+}
+let _nettoyage = false;
+async function nettoyerFactures() {
+  if (_nettoyage || !factEnLigne()) return; _nettoyage = true;
+  try {
+    const hors = Store.all('factures').filter(f => !factAutorisee(f));
+    for (const f of hors) { await FactPdf.remove(f); await Store.remove('factures', f.id); }
+    if (hors.length) toast(`${hors.length} document${hors.length > 1 ? 's' : ''} retiré${hors.length > 1 ? 's' : ''} : pas un mail de facture`);
+  } finally { _nettoyage = false; }
+}
 async function lireFacture(f) {
+  if (!factAutorisee(f)) { await FactPdf.remove(f); await Store.remove('factures', f.id); return; }
   const lib = await chargerPdfJs();
   const octets = await FactPdf.get(f);
   const pages = await FactEngine.lirePdf(lib, octets.slice());
@@ -3117,6 +3175,8 @@ async function lireFacture(f) {
   }
   const patch = { lu: r.lu, luLe: new Date().toISOString(), luVersion: GABARITS_VERSION };
   for (const k of ['numero', 'date', 'echeance', 'fournisseur', 'gabarit', 'type']) if (r[k]) patch[k] = r[k];
+  const regle = f.source === 'mail' && f.mail ? regleFacture(f.mail.email, f.mail.sujet) : null;
+  if (regle) patch.fournisseur = regle.f;   // le nom officiel du fournisseur, d'après son mail de facture
   for (const k of ['ht', 'ttc', 'tvaMontant', 'tva', 'htMarchandise']) if (r[k] != null) patch[k] = r[k];
   if (r.statut === 'payee' && f.statut !== 'payee') { patch.statut = 'payee'; patch.payeeLe = r.date || todayStr(); }
   if (r.tvaDetail && r.tvaDetail.length) patch.tvaDetail = r.tvaDetail;
