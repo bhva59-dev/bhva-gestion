@@ -3387,7 +3387,8 @@ const FactLecture = {
 const FACT_DEPUIS = '2026-10-30T23:00:00Z';   // départ : factures reçues à partir du 31/10/2026 00h00 (heure de Paris) ; le stock repart de l'inventaire
 function factAutorisee(f) {
   if (!f || f.source !== 'mail' || !f.mail) return true;            // PDF ajouté à la main : on le garde (contrôle du contenu ensuite)
-  if (!f.mail.date || f.mail.date < FACT_DEPUIS) return false;     // reçue avant le départ
+  // plus de date limite ici : le robot ne prend que les mails reçus depuis son départ, et les factures plus anciennes
+  // sont ajoutées une par une, à la demande (dans l'ordre d'arrivée, en remontant)
   const r = regleFacture(f.mail.email, f.mail.sujet);
   return !!r && pdfFacture(r, f.pdf && f.pdf.nom);
 }
@@ -3469,7 +3470,7 @@ setInterval(() => FactLecture.planifier(), 20000);
 /* ---------- mise à jour automatique ----------
    Quand une nouvelle version est publiée, chaque appareil (iPad du comptoir, téléphone) se recharge tout seul
    au premier moment calme : pas de fenêtre ouverte, pas de saisie en cours, pas d'alerte qui sonne, pas d'enregistrement. */
-const APP_VERSION = '5ee995af03';
+const APP_VERSION = 'a6df7cf93f';
 const MiseAJour = {
   attente: null, _t: 0,
   async verifier() {
