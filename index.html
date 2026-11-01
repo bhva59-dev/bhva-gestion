@@ -3484,7 +3484,7 @@ setInterval(() => FactLecture.planifier(), 20000);
 /* ---------- mise à jour automatique ----------
    Quand une nouvelle version est publiée, chaque appareil (iPad du comptoir, téléphone) se recharge tout seul
    au premier moment calme : pas de fenêtre ouverte, pas de saisie en cours, pas d'alerte qui sonne, pas d'enregistrement. */
-const APP_VERSION = 'd811500673';
+const APP_VERSION = '3539a95798';
 const MiseAJour = {
   attente: null, _t: 0,
   async verifier() {
@@ -3687,6 +3687,7 @@ async function mettreEnStock(id, manuel) {
   if (!(await reserverStock(id))) { if (manuel) toast('Facture déjà en cours d\'entrée en stock sur un autre appareil'); return false; }
   const L = lignesStock(f); const tva = tauxTvaFacture(f); const maintenant = new Date().toISOString();
   for (const x of L) {
+    if (Store.get('mouvements', 'mv-' + id + '-' + x.i)) continue;   // déjà entré (facture remise après avoir été effacée) : jamais deux fois en stock
     const st = Store.get('stock', x.p.id) || { qte: 0, unite: x.unite, min: null };
     const q = Math.round(((num(st.qte) || 0) + x.qte) * 1000) / 1000;
     const avant = num(st.qte) || 0, pa = num(st.achatHT);   // prix d'achat moyen pondéré (stock restant + nouvelle entrée)
