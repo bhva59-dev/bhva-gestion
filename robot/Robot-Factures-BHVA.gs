@@ -5,26 +5,29 @@
  * même quand le PC et l'iPad sont éteints. Aucune IA, aucun abonnement.
  *
  * Toutes les 5 heures :
- *   1. regarde UNIQUEMENT les mails de factures connus reçus depuis le 31/10/2026 18h45 (liste MAILS_FACTURES ci-dessous :
+ *   1. regarde UNIQUEMENT les mails de factures connus reçus depuis le 31/10/2026 (liste MAILS_FACTURES ci-dessous :
  *      bon expéditeur + bon objet + bon nom de PDF) ;
  *   2. copie le PDF de la facture dans l'appli BHVA (rubrique Factures) ;
  *   3. ne crée jamais deux fois la même facture (empreinte du fichier) ;
  *   4. range le mail sous le libellé « BHVA-importee » ;
- *   5. envoie une notification sur le téléphone (appli gratuite ntfy) pour chaque nouvelle facture :
- *      la toucher ouvre la conversation avec Claude pour la traiter (fournisseur, gabarit, références → produits).
+ *   5. envoie une notification sur le téléphone d'Adam (appli gratuite ntfy, sujet NTFY_SUJET) pour chaque nouvelle facture :
+ *      la toucher ouvre la conversation avec Claude pour la traiter (fournisseur, gabarit, références → produits) ;
+ *   6. repère aussi les mails avec un PDF « facture » venant d'un expéditeur INCONNU (nouveau fournisseur ?) :
+ *      ils ne sont pas copiés, mais Adam est prévenu une fois (libellé « BHVA-vu ») pour qu'on les ajoute à la liste.
  * Relevés, relances, avoirs, bons de livraison, cours, devis… ne sont jamais pris.
  * Nouveau fournisseur : ajouter une ligne dans MAILS_FACTURES.
  */
 
 const CONFIG = {
   HEURES: 5,                 // une vérification toutes les 5 heures
-  DEPUIS: new Date('2026-10-31T17:45:00Z'), // départ : seules les factures reçues après le 31/10/2026 18h45 (le stock repart de l'inventaire)
+  DEPUIS: new Date('2026-10-30T23:00:00Z'), // départ : factures reçues à partir du 31/10/2026 00h00 (heure de Paris)
   LIBELLE: 'BHVA-importee',
+  LIBELLE_VU: 'BHVA-vu',                    // mails avec PDF déjà regardés par le repérage des nouveaux fournisseurs
   PROJET: 'bhva-gestion',
   CLE_API: 'AIzaSyAuEx9IUK0JdWXJeLgFj86IB0-KCdwaf4U', // clé publique de l'appli (déjà visible dans le site)
   TAILLE_MORCEAU: 900000,    // découpe des PDF pour la base (limite 1 Mo par fiche)
-  NTFY_SUJET: 'bhva-elfen-prix-7q4m2x',                                     // notifications (même sujet que les alertes de prix)
-  LIEN_CLAUDE: 'https://claude.ai/code/session_01BNsuqZrN2rKS1DoCx9XsG5',  // ouvert en touchant la notification
+  NTFY_SUJET: 'bhva-factures-bxq7cn',                                       // notifications factures → téléphone d'Adam (pas l'iPad du comptoir)
+  LIEN_CLAUDE: 'https://claude.ai/code/session_01BNsuqZf3tJo3GBGZHAsmBs',  // ouvert en touchant la notification
   LIEN_APPLI: 'https://bhva59-dev.github.io/bhva-gestion/#factures'
 };
 
@@ -125,36 +128,80 @@ function importer_() {
     verrou.releaseLock();
   }
   if (liste.length) notifier_(liste);
+  try { reperer_(); } catch (e) { Logger.log('Repérage nouveaux fournisseurs : ' + e); }
   return nouvelles;
 }
 
-/* Notification sur le téléphone (appli ntfy, gratuite) : une seule notification par passage, même s'il y a plusieurs factures.
+/* Mails avec un PDF qui ressemble à une facture, envoyés par un expéditeur qui n'est PAS dans la liste (nouveau fournisseur ?).
+   Rien n'est copié dans l'appli : Adam est seulement prévenu, une seule fois par mail (libellé BHVA-vu). */
+function reperer_() {
+  const lib = GmailApp.getUserLabelByName(CONFIG.LIBELLE_VU) || GmailApp.createLabel(CONFIG.LIBELLE_VU);
+  const q = 'has:attachment filename:pdf after:' + Math.floor(CONFIG.DEPUIS.getTime() / 1000) + ' -from:me -in:sent -label:' + CONFIG.LIBELLE + ' -label:' + CONFIG.LIBELLE_VU;
+  const fils = GmailApp.search(q, 0, 100);
+  const vus = [];
+  fils.forEach(fil => {
+    fil.getMessages().forEach(msg => {
+      if (msg.getDate() < CONFIG.DEPUIS) return;
+      const de = msg.getFrom();
+      const email = ((de.match(/<([^>]+)>/) || [null, de])[1] || '').trim().toLowerCase();
+      if (MAILS_FACTURES.some(r => r.de.test(email))) return;          // fournisseur connu : ses autres mails (relevés, relances…) ne comptent pas
+      const sujet = msg.getSubject() || '';
+      const pdfs = msg.getAttachments({ includeInlineImages: false }).map(a => a.getName()).filter(n => /\.pdf$/i.test(n));
+      if (!pdfs.length) return;
+      const facture = /factur|faktur|invoice|factuur|rechnung|receipt|\bfact\b|\bFA[-_ ]?\d{3,}|\bINV[-_ /]?\d/i;
+      if (!facture.test(sujet) && !pdfs.some(n => facture.test(n))) return;
+      vus.push({ de: de, email: email, sujet: sujet, date: msg.getDate(), pdf: pdfs[0] });
+    });
+    fil.addLabel(lib);
+  });
+  if (!vus.length) return;
+  const p = PropertiesService.getScriptProperties();
+  let journal = []; try { journal = JSON.parse(p.getProperty('aTrier') || '[]'); } catch (e) { }
+  vus.forEach(x => journal.push({ le: new Date().toISOString(), de: x.email, sujet: x.sujet, pdf: x.pdf, recu: x.date.toISOString() }));
+  p.setProperty('aTrier', JSON.stringify(journal.slice(-30)));
+  const tz = 'Europe/Paris';
+  const titre = vus.length === 1 ? 'Facture d\'un nouveau fournisseur ?' : vus.length + ' factures de nouveaux fournisseurs ?';
+  const message = vus.map(x => '• ' + x.de + ' — ' + x.sujet + ' (' + Utilities.formatDate(x.date, tz, "dd/MM HH:mm") + ')').join('\n')
+    + '\nPas encore dans la liste : touche pour qu\'on l\'ajoute avec Claude';
+  envoyer_(titre, message, 'question', 3);
+}
+
+/* Notification sur le téléphone d'Adam (appli ntfy, gratuite) : une seule notification par passage, même s'il y a plusieurs factures.
    La nuit (21 h – 7 h) elle arrive sans sonner. La toucher ouvre la conversation avec Claude. */
 function notifier_(liste) {
-  if (!CONFIG.NTFY_SUJET || !liste.length) return;
+  if (!liste.length) return;
   const tz = 'Europe/Paris';
-  const heure = Number(Utilities.formatDate(new Date(), tz, 'H'));
-  const nuit = heure >= 21 || heure < 7;
   let titre, message, tag;
   if (liste.length === 1) {
     const x = liste[0];
     titre = (x.mixte ? 'Nouveau document : ' : 'Nouvelle facture : ') + x.f;
-    message = x.sujet + '\nReçu le ' + Utilities.formatDate(x.date, tz, "dd/MM 'à' HH:mm") + ' · touche pour le traiter avec Claude';
+    message = x.sujet + '\nReçu le ' + Utilities.formatDate(x.date, tz, "dd/MM 'à' HH:mm") + '\nTouche ici : on la traite ensemble avec Claude (fournisseur, gabarit, références)';
     tag = x.mixte ? 'page_facing_up' : 'receipt';
   } else {
     titre = liste.length + ' nouvelles factures';
-    message = liste.map(x => '• ' + x.f + ' : ' + x.sujet).join('\n') + '\nTouche pour les traiter avec Claude';
+    message = liste.map(x => '• ' + x.f + ' : ' + x.sujet).join('\n') + '\nTouche ici : on les traite ensemble avec Claude';
     tag = 'receipt';
   }
+  envoyer_(titre, message, tag, 4);
+}
+function envoyer_(titre, message, tag, priorite) {
+  if (!CONFIG.NTFY_SUJET) return;
+  const heure = Number(Utilities.formatDate(new Date(), 'Europe/Paris', 'H'));
+  const nuit = heure >= 21 || heure < 7;
   try {
     UrlFetchApp.fetch('https://ntfy.sh', {
       method: 'post', contentType: 'application/json', muteHttpExceptions: true,
       payload: JSON.stringify({
-        topic: CONFIG.NTFY_SUJET, title: titre, message: message, priority: nuit ? 2 : 4, tags: [tag], click: CONFIG.LIEN_CLAUDE,
-        actions: [{ action: 'view', label: 'Voir dans l\'appli', url: CONFIG.LIEN_APPLI }, { action: 'view', label: 'Ouvrir Claude', url: CONFIG.LIEN_CLAUDE }]
+        topic: CONFIG.NTFY_SUJET, title: titre, message: message, priority: nuit ? 2 : priorite, tags: [tag], click: CONFIG.LIEN_CLAUDE,
+        actions: [{ action: 'view', label: 'Ouvrir Claude', url: CONFIG.LIEN_CLAUDE }, { action: 'view', label: 'Voir dans l\'appli', url: CONFIG.LIEN_APPLI }]
       })
     });
   } catch (e) { Logger.log('Notification impossible : ' + e); }
+}
+
+/* Pour tester la notification sur le téléphone (bouton ▶ sur cette fonction). */
+function testerNotification() {
+  envoyer_('Test BHVA', 'Les factures arriveront ici. Touche pour ouvrir Claude.', 'white_check_mark', 4);
 }
 
 function traiterMessage_(msg, liste) {

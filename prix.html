@@ -586,6 +586,17 @@ textarea.input{min-height:90px}
 .fact-ico{display:grid;place-items:center;font-size:1.6rem;cursor:pointer;color:var(--fg-3)}
 .pdf-view{display:flex;flex-direction:column;align-items:center;gap:12px;max-height:72vh;overflow:auto;background:#e9ecf2;border-radius:12px;padding:12px}
 .pdf-page{background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.15);border-radius:4px;max-width:100%}
+.lier-btn{display:inline-flex;align-items:center;gap:6px;min-height:42px;padding:6px 12px;border-radius:10px;border:1px solid var(--line-strong);background:var(--surface);color:var(--fg);font:inherit;font-weight:700;font-size:.92rem;cursor:pointer;text-align:left;line-height:1.2}
+.lier-btn small{font-weight:500;opacity:.75}
+.lier-btn.ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}
+.lier-btn.ign{color:var(--fg-3);font-weight:600}
+.lier-btn.todo{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.lier-head{padding:12px 14px;border-radius:12px;background:var(--surface-2)}
+.lier-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-top:6px}
+.lier-prod{min-height:58px;padding:10px 12px;border-radius:12px;border:1px solid var(--line-strong);background:var(--surface);color:var(--fg);font:inherit;font-weight:700;font-size:1rem;text-align:left;cursor:pointer;display:flex;flex-direction:column;justify-content:center;gap:2px}
+.lier-prod small{font-weight:500;font-size:.8rem;opacity:.7}
+.lier-prod.sugg{border:2px solid var(--fg)}
+.lier-prod.on{background:var(--ok-soft);border-color:var(--ok);color:var(--ok)}
 </style>
 
 </head>
@@ -689,7 +700,7 @@ const LS = {
 };
 
 /* ===================== store (db capability, or local file) ===================== */
-const COLLS = ['produits', 'reglages', 'receptions', 'fabrications', 'journal', 'commandes', 'dlc', 'factures', 'stock', 'mouvements', 'recettes', 'notifications', 'equipements', 'temperatures', 'vocaux'];
+const COLLS = ['produits', 'reglages', 'receptions', 'fabrications', 'journal', 'commandes', 'dlc', 'factures', 'stock', 'mouvements', 'recettes', 'notifications', 'equipements', 'temperatures', 'vocaux', 'liaisons'];
 const Store = {
   mode: 'local', db: null, cache: {}, ready: false, _subs: new Set(), _raf: 0, _unsubs: [], errors: 0,
   fb: null,
@@ -3175,7 +3186,7 @@ const FactLecture = {
   }
 };
 /* Une fiche venue d'un mail n'est gardée que si le mail est un « mail de facture » reconnu (liste MAILS_FACTURES) */
-const FACT_DEPUIS = '2026-10-31T17:45:00Z';   // départ : les factures d'avant ont servi de test ; le stock repart de l'inventaire
+const FACT_DEPUIS = '2026-10-30T23:00:00Z';   // départ : factures reçues à partir du 31/10/2026 00h00 (heure de Paris) ; le stock repart de l'inventaire
 function factAutorisee(f) {
   if (!f || f.source !== 'mail' || !f.mail) return true;            // PDF ajouté à la main : on le garde (contrôle du contenu ensuite)
   if (!f.mail.date || f.mail.date < FACT_DEPUIS) return false;     // reçue avant le départ
@@ -3303,11 +3314,76 @@ function ouvrirFacture(id) {
       <div><span class="k">Statut</span><b>${f.type === 'avoir' ? 'Avoir' : f.statut === 'payee' ? 'Payée' : 'À payer'}</b></div>
     </div>
     ${tvaD.length ? `<div class="card-sub"><div class="eyebrow">Détail TVA</div><table class="table"><thead><tr><th>Taux</th><th class="right">Base HT</th><th class="right">TVA</th></tr></thead><tbody>${tvaD.map(t => `<tr><td>${esc(String(t.taux).replace('.', ','))} %</td><td class="right num">${esc(fmtMoney(t.base))}</td><td class="right num">${esc(fmtMoney(t.montant))}</td></tr>`).join('')}</tbody></table></div>` : ''}
-    ${lignes.length ? `<div class="card-sub"><div class="eyebrow">Lignes de la facture (${lignes.length})${f.lignesOk === false ? ' · <span class="pill pill-warn">total à vérifier</span>' : ''}</div><div class="table-wrap"><table class="table"><thead><tr><th>Réf.</th><th>Désignation</th><th class="right">Qté</th><th class="right">PU HT</th><th class="right">Montant</th></tr></thead><tbody>${lignes.map(l => `<tr><td class="muted">${esc(l.ref || '')}</td><td>${esc(l.designation || '')}</td><td class="right num">${esc(l.qte != null ? fmtQty(l.qte) : '')}${l.unite ? ' ' + esc(l.unite) : ''}${l.pieces && l.unite === 'kg' ? ` <small class="muted">(${esc(String(l.pieces))} p.)</small>` : ''}</td><td class="right num">${esc(l.pu != null ? fmtMoney(l.pu) : '')}</td><td class="right num">${esc(l.montant != null ? fmtMoney(l.montant) : '')}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
+    ${lignes.length ? `<div class="card-sub"><div class="eyebrow">Lignes de la facture (${lignes.length})${f.lignesOk === false ? ' · <span class="pill pill-warn">total à vérifier</span>' : ''}${aRelier(f) ? ` · <span class="pill pill-warn">${aRelier(f)} à relier à vos produits</span>` : ' · <span class="pill pill-ok">toutes reliées à vos produits</span>'}</div><div class="table-wrap"><table class="table"><thead><tr><th>Réf.</th><th>Désignation</th><th class="right">Qté</th><th class="right">PU HT</th><th class="right">Montant</th><th>Chez nous</th></tr></thead><tbody>${lignes.map((l, i) => `<tr><td class="muted">${esc(l.ref || '')}</td><td>${esc(l.designation || '')}</td><td class="right num">${esc(l.qte != null ? fmtQty(l.qte) : '')}${l.unite ? ' ' + esc(l.unite) : ''}${l.pieces && l.unite === 'kg' ? ` <small class="muted">(${esc(String(l.pieces))} p.)</small>` : ''}</td><td class="right num">${esc(l.pu != null ? fmtMoney(l.pu) : '')}</td><td class="right num">${esc(l.montant != null ? fmtMoney(l.montant) : '')}</td><td>${lienLigne(f, l, i)}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
     ${f.mail ? `<p class="help">Mail : « ${esc(f.mail.sujet || '')} » de ${esc(f.mail.de || '')}</p>` : ''}
   </div>`;
   openModal({ title: `${f.fournisseur || 'Facture'}${f.numero ? ' · n° ' + f.numero : ''}`, body, footer: `${f.pdf ? `<button class="btn btn-xl" data-act="pdfview" data-id="${esc(id)}">📄 Voir le PDF</button>` : ''}${f.pdf ? `<button class="btn" data-act="factrelire" data-id="${esc(id)}">↻ Relire</button>` : ''}<button class="btn" data-act="editfact" data-id="${esc(id)}">${I.pencil} Corriger</button><button class="btn btn-primary" data-close="1">Fermer</button>` });
 }
+
+/* ---------- références des fournisseurs → produits du catalogue ----------
+   Chaque référence d'un fournisseur est reliée UNE fois à un produit de la boucherie (collection « liaisons ») ;
+   ensuite toutes les factures de ce fournisseur avec cette référence sont reconnues toutes seules (et alimenteront le stock). */
+const slugRef = s => normStr(s).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+function cleLigne(f, l) { return ((slugRef(f && f.fournisseur) || 'fournisseur') + '__' + (slugRef(l && (l.ref || l.ean || l.designation)) || 'ligne')).slice(0, 140); }
+function liaisonDe(f, l) { return Store.get('liaisons', cleLigne(f, l)); }
+function aRelier(f) { return (!f || f.ecarte || f.lu === 'ignore' || !Array.isArray(f.lignes)) ? 0 : f.lignes.filter(l => !liaisonDe(f, l)).length; }
+/* quantité qui entrera en stock pour cette ligne, dans l'unité du produit (kg ou pièce) ; null = à préciser */
+function qteStockLigne(l, p) {
+  if (!l || !p) return null;
+  if (p.unit === 'kg') return l.unite === 'kg' ? num(l.qte) : num(l.poids);
+  return l.unite === 'kg' ? num(l.pieces) : num(l.qte);
+}
+const uniteCourte = u => u === 'kg' ? 'kg' : 'p.';
+function lienLigne(f, l, i) {
+  const li = liaisonDe(f, l); const a = `data-act="factlier" data-id="${esc(f.id)}" data-i="${i}"`;
+  if (li && li.ignore) return `<button class="lier-btn ign" ${a}>— pas en stock</button>`;
+  if (li && li.produitId) {
+    const p = Store.get('produits', li.produitId); const q = qteStockLigne(l, p);
+    return `<button class="lier-btn ok" ${a}>✓ ${esc(p ? p.name : (li.produitNom || 'produit'))}${p && q != null ? ` <small>${esc(fmtQty(q))} ${uniteCourte(p.unit)}</small>` : ''}</button>`;
+  }
+  return `<button class="lier-btn todo" ${a}>Relier ›</button>`;
+}
+const MOTS_VIDES = new Set(['de', 'du', 'des', 'la', 'le', 'les', 'au', 'aux', 'et', 'en', 'pret', 'cuire', 'pac', 'sous', 'vide', 'sv', 'kg', 'gr', 'pce', 'pcs', 'piece', 'pieces', 'colis', 'frais', 'fraiche', 'halal', 'vrac', 'cat', 'calibre', 'env', 'avec', 'sans', 'par', 'pour', 'bte', 'boite', 'carton', 'ctn', 'sac']);
+const motsRef = s => normStr(s).replace(/label rouge|pret a cuire|sous vide|sans os|avec os|[a-z]* ?d'origine [a-z]+/g, ' ').replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(w => w.length > 1 && !MOTS_VIDES.has(w) && !/^\d/.test(w)).map(w => w.replace(/(es|s|e)$/, ''));
+function suggestionsLigne(l, n = 6) {
+  const a = motsRef(l && l.designation); if (!a.length) return [];
+  return Store.all('produits').filter(p => p.actif !== false).map(p => {
+    const b = motsRef(p.name); let s = 0;
+    b.forEach(w => { if (a.includes(w)) s += w === a[0] ? 3 : 2; else if (a.some(x => x.length > 3 && w.length > 3 && (x.startsWith(w) || w.startsWith(x)))) s += 1; else s -= 1; });
+    return { p, s };
+  }).filter(x => x.s >= 1.5).sort((x, y) => y.s - x.s || x.p.name.localeCompare(y.p.name, 'fr')).slice(0, n).map(x => x.p);
+}
+const LierOpts = { id: null, i: 0, q: '' };
+const boutonProduit = (p, li, sugg) => `<button class="lier-prod${sugg ? ' sugg' : ''}${li && li.produitId === p.id ? ' on' : ''}" data-act="factlierchoix" data-pid="${esc(p.id)}">${esc(p.name)}<small>${p.unit === 'kg' ? 'au kg' : 'à la pièce'}${p.price != null ? ' · ' + esc(fmtMoney(p.price)) : ''}</small></button>`;
+function listeLiaison() {
+  const f = Store.get('factures', LierOpts.id); const l = f && Array.isArray(f.lignes) ? f.lignes[LierOpts.i] : null; if (!l) return '';
+  const li = liaisonDe(f, l); const q = normStr(LierOpts.q).trim();
+  const prods = Store.all('produits').filter(p => p.actif !== false && (!q || normStr(p.name).includes(q)))
+    .sort((a, b) => (a.cat === 'viande' ? 0 : 1) - (b.cat === 'viande' ? 0 : 1) || a.name.localeCompare(b.name, 'fr'));
+  if (!prods.length) return `<div class="empty"><strong>Aucun produit « ${esc(LierOpts.q)} »</strong><span>Essayez un autre mot.</span></div>`;
+  return `<div class="lier-grid">${prods.slice(0, 150).map(p => boutonProduit(p, li)).join('')}</div>`;
+}
+function ouvrirLiaison(id, i) {
+  const f = Store.get('factures', id); const l = f && Array.isArray(f.lignes) ? f.lignes[i] : null; if (!l) return;
+  Object.assign(LierOpts, { id, i: +i, q: '' });
+  const li = liaisonDe(f, l); const sug = suggestionsLigne(l);
+  const qte = [l.qte != null ? fmtQty(l.qte) + ' ' + (l.unite || '') : '', l.pieces && l.unite === 'kg' ? l.pieces + ' pièces' : '', l.colis ? l.colis + ' colis' : ''].filter(Boolean).join(' · ');
+  const body = `<div class="stack">
+    <div class="lier-head"><div class="eyebrow">${esc(f.fournisseur || '')}${l.ref ? ' · réf. ' + esc(l.ref) : ''}</div><div style="font-weight:800;font-size:1.1rem;margin:2px 0">${esc(l.designation || '')}</div><div class="muted">${esc(qte)}${l.pu != null ? ' · ' + esc(fmtMoney(l.pu)) + (l.unite === 'kg' ? ' le kg' : '') + ' HT' : ''}</div></div>
+    ${sug.length ? `<div><div class="eyebrow">C'est sûrement…</div><div class="lier-grid">${sug.map(p => boutonProduit(p, li, true)).join('')}</div></div>` : ''}
+    <div><div class="eyebrow">Tous les produits</div><input class="input" type="search" placeholder="Chercher un produit…" data-on="liersearch" autocomplete="off" style="margin:6px 0 4px"><div id="lier-list">${listeLiaison()}</div></div>
+  </div>`;
+  openModal({ title: li ? 'Changer le produit relié' : 'Relier à un de vos produits', body, footer: `<button class="btn" data-act="factopen" data-id="${esc(id)}">← Retour à la facture</button>${li ? `<button class="btn btn-danger" data-act="factdelier" data-id="${esc(id)}" data-i="${i}">Défaire</button>` : ''}<button class="btn" data-act="factlierignore" data-id="${esc(id)}" data-i="${i}">Pas suivi en stock</button>` });
+}
+async function lierLigne(id, i, pid, ignore) {
+  const f = Store.get('factures', id); const l = f && Array.isArray(f.lignes) ? f.lignes[i] : null; if (!l) return;
+  const key = cleLigne(f, l); const prev = Store.get('liaisons', key); const p = pid ? Store.get('produits', pid) : null;
+  if (pid && !p) { toast('Produit introuvable', 'err'); return; }
+  await Store.set('liaisons', key, { fournisseur: f.fournisseur || '', ref: l.ref || '', ean: l.ean || '', designation: l.designation || '', unite: l.unite || '', produitId: p ? p.id : '', produitNom: p ? p.name : '', ignore: !p && !!ignore, factureId: id, cree: (prev && prev.cree) || new Date().toISOString(), maj: new Date().toISOString() });
+  toast(p ? `Relié : ${l.designation} → ${p.name}` : 'Noté : cette ligne ne compte pas dans le stock', 'ok');
+  ouvrirFacture(id);
+}
+Object.assign(Inputs, { liersearch: el => { LierOpts.q = el.value; const box = $('#lier-list'); if (box) box.innerHTML = listeLiaison(); } });
 
 /* ---------- écran Factures (remplace l'ancien) ---------- */
 Object.assign(FactOpts, { q: '' });
@@ -3326,7 +3402,7 @@ Views.factures = function () {
     .sort((a, b) => (b.date || '').localeCompare(a.date || '') || String(b.cree || '').localeCompare(String(a.cree || '')));
   const lu = f => f.lu === 'a_lire' ? '<span class="pill pill-info">lecture…</span>' : f.lu === 'a_verifier' ? '<span class="pill pill-warn">à vérifier</span>' : f.lu === 'erreur' ? '<span class="pill pill-crit">illisible</span>' : f.lu === 'scan' ? '<span class="pill pill-neutral">scan</span>' : '';
   const item = f => { const late = estF(f) && f.statut !== 'payee' && f.echeance && f.echeance <= t; const thumb = f.photo ? `<img class="photo-thumb" src="${esc(f.photo.startsWith('data:') ? f.photo : '/_blob/' + f.photo)}" alt="" data-act="viewphoto" data-id="${f.id}" style="cursor:zoom-in">` : `<span class="photo-thumb fact-ico" data-act="${f.pdf ? 'pdfview' : 'factopen'}" data-id="${f.id}">${f.pdf ? '📄' : I.receipt}</span>`;
-    return `<div class="list-item fact-item">${thumb}<div class="main" data-act="factopen" data-id="${f.id}" style="cursor:pointer"><div class="title"><span class="pill ${f.type === 'facture' ? 'pill-info' : f.type === 'avoir' ? 'pill-ok' : 'pill-neutral'}">${f.type === 'facture' ? 'Facture' : f.type === 'avoir' ? 'Avoir' : 'BL'}</span> ${esc(f.fournisseur || 'Fournisseur ?')}${f.numero ? ` <span class="muted">n° ${esc(f.numero)}</span>` : ''} ${f.source === 'mail' ? '<span title="reçue par mail">📧</span>' : ''} ${lu(f)}</div><div class="sub">${esc(fmtDate(f.date))}${f.ttc != null ? ` · <b>${esc(fmtMoney(num(f.ttc)))}</b> TTC` : ''}${f.ht != null ? ` · ${esc(fmtMoney(num(f.ht)))} HT` : ''}${f.echeance && estF(f) ? ` · échéance ${esc(fmtDate(f.echeance))}` : ''}${Array.isArray(f.lignes) && f.lignes.length ? ` · ${f.lignes.length} ligne${f.lignes.length > 1 ? 's' : ''}` : ''}${f.note ? ' · ' + esc(f.note) : ''}</div></div>${estF(f) ? `<span class="pill ${f.statut === 'payee' ? 'pill-ok' : late ? 'pill-crit' : 'pill-warn'}">${f.statut === 'payee' ? 'Payée' : late ? 'Échue' : 'À payer'}</span>${f.statut !== 'payee' ? `<button class="btn btn-sm btn-dark" data-act="factpayee" data-id="${f.id}">✓ Payée</button>` : ''}` : ''}<button class="icon-btn" data-act="editfact" data-id="${f.id}" aria-label="Modifier">${I.pencil}</button></div>`; };
+    return `<div class="list-item fact-item">${thumb}<div class="main" data-act="factopen" data-id="${f.id}" style="cursor:pointer"><div class="title"><span class="pill ${f.type === 'facture' ? 'pill-info' : f.type === 'avoir' ? 'pill-ok' : 'pill-neutral'}">${f.type === 'facture' ? 'Facture' : f.type === 'avoir' ? 'Avoir' : 'BL'}</span> ${esc(f.fournisseur || 'Fournisseur ?')}${f.numero ? ` <span class="muted">n° ${esc(f.numero)}</span>` : ''} ${f.source === 'mail' ? '<span title="reçue par mail">📧</span>' : ''} ${lu(f)}</div><div class="sub">${esc(fmtDate(f.date))}${f.ttc != null ? ` · <b>${esc(fmtMoney(num(f.ttc)))}</b> TTC` : ''}${f.ht != null ? ` · ${esc(fmtMoney(num(f.ht)))} HT` : ''}${f.echeance && estF(f) ? ` · échéance ${esc(fmtDate(f.echeance))}` : ''}${Array.isArray(f.lignes) && f.lignes.length ? ` · ${f.lignes.length} ligne${f.lignes.length > 1 ? 's' : ''}` : ''}${aRelier(f) ? ` · <span class="pill pill-warn">${aRelier(f)} à relier</span>` : ''}${f.note ? ' · ' + esc(f.note) : ''}</div></div>${estF(f) ? `<span class="pill ${f.statut === 'payee' ? 'pill-ok' : late ? 'pill-crit' : 'pill-warn'}">${f.statut === 'payee' ? 'Payée' : late ? 'Échue' : 'À payer'}</span>${f.statut !== 'payee' ? `<button class="btn btn-sm btn-dark" data-act="factpayee" data-id="${f.id}">✓ Payée</button>` : ''}` : ''}<button class="icon-btn" data-act="editfact" data-id="${f.id}" aria-label="Modifier">${I.pencil}</button></div>`; };
   return `
   <div class="page-head"><div><div class="eyebrow">Fournisseurs</div><h1>Factures & bons de livraison</h1><p class="lead">Les factures reçues par mail arrivent toutes seules, montants lus automatiquement.</p></div>
     <div class="toolbar"><button class="btn btn-xl" data-act="factpdf">📄 Ajouter des PDF</button><button class="btn btn-xl" data-act="newfact" data-type="bl">${I.camera} Bon de livraison</button><button class="btn btn-xl btn-primary" data-act="newfact" data-type="facture">${I.camera} Facture</button></div></div>
@@ -3342,6 +3418,10 @@ function ouvrirEcartes() {
   openModal({ title: 'Documents mis de côté', body: `<p class="help">Reçus avec les factures, mais ce ne sont pas des factures : ils ne comptent nulle part. Si l'un d'eux est quand même une facture, touchez « C'est une facture ».</p><div class="list">${L.map(f => `<div class="list-item"><span class="photo-thumb fact-ico" data-act="pdfview" data-id="${f.id}">📄</span><div class="main"><div class="title"><span class="pill pill-neutral">${esc(ECARTE_LIBELLE[f.ecarte] || 'Pas une facture')}</span> ${esc(f.fournisseur || '')}${f.numero ? ` <span class="muted">n° ${esc(f.numero)}</span>` : ''}</div><div class="sub">${esc(f.mail && f.mail.date ? 'reçu le ' + fmtDate(f.mail.date.slice(0, 10)) : fmtDate(f.date))}${f.mail && f.mail.sujet ? ' · ' + esc(f.mail.sujet) : ''}</div></div><button class="btn btn-sm" data-act="pdfview" data-id="${f.id}">Voir</button><button class="btn btn-sm btn-dark" data-act="factforcer" data-id="${f.id}">C'est une facture</button></div>`).join('')}</div>`, footer: `<button class="btn btn-primary" data-close="1">Fermer</button>` });
 }
 Object.assign(Actions, {
+  factlier: el => ouvrirLiaison(el.dataset.id, +el.dataset.i),
+  factlierchoix: el => lierLigne(LierOpts.id, LierOpts.i, el.dataset.pid),
+  factlierignore: el => lierLigne(el.dataset.id, +el.dataset.i, null, true),
+  factdelier: async el => { const f = Store.get('factures', el.dataset.id); const l = f && Array.isArray(f.lignes) ? f.lignes[+el.dataset.i] : null; if (!l) return; await Store.remove('liaisons', cleLigne(f, l)); toast('Liaison défaite'); ouvrirFacture(el.dataset.id); },
   factpdf: () => $('#file-pdf').click(),
   factopen: el => ouvrirFacture(el.dataset.id),
   pdfview: el => voirPdf(el.dataset.id),
