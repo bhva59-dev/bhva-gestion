@@ -3471,7 +3471,7 @@ setInterval(() => FactLecture.planifier(), 20000);
 /* ---------- mise à jour automatique ----------
    Quand une nouvelle version est publiée, chaque appareil (iPad du comptoir, téléphone) se recharge tout seul
    au premier moment calme : pas de fenêtre ouverte, pas de saisie en cours, pas d'alerte qui sonne, pas d'enregistrement. */
-const APP_VERSION = 'a6df7cf93f';
+const APP_VERSION = '10919f440f';
 const MiseAJour = {
   attente: null, _t: 0,
   async verifier() {
@@ -3570,6 +3570,7 @@ function qteStockLigne(l, p) {
 const uniteCourte = u => u === 'kg' ? 'kg' : 'p.';
 function lienLigne(f, l, i) {
   const li = liaisonDe(f, l); const a = `data-act="factlier" data-id="${esc(f.id)}" data-i="${i}"`;
+  if (li && li.frais) return `<button class="lier-btn ign" ${a}>+ frais sur le prix d'achat</button>`;
   if (li && li.ignore) return `<button class="lier-btn ign" ${a}>— pas en stock</button>`;
   if (li && li.produitId) {
     const p = Store.get('produits', li.produitId); const q = qteStockLigne(l, p);
@@ -3579,13 +3580,16 @@ function lienLigne(f, l, i) {
 }
 const MOTS_VIDES = new Set(['de', 'du', 'des', 'la', 'le', 'les', 'au', 'aux', 'et', 'en', 'pret', 'cuire', 'pac', 'sous', 'vide', 'sv', 'kg', 'gr', 'pce', 'pcs', 'piece', 'pieces', 'colis', 'frais', 'fraiche', 'halal', 'vrac', 'cat', 'calibre', 'env', 'avec', 'sans', 'par', 'pour', 'bte', 'boite', 'carton', 'ctn', 'sac']);
 const motsRef = s => normStr(s).replace(/label rouge|pret a cuire|sous vide|sans os|avec os|[a-z]* ?d'origine [a-z]+/g, ' ').replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(w => w.length > 1 && !MOTS_VIDES.has(w) && !/^\d/.test(w)).map(w => w.replace(/(es|s|e)$/, ''));
-function suggestionsLigne(l, n = 6) {
+const ESPECE_FOURNISSEUR = [[/tendriade/i, 'veau'], [/ldc|lionor|gallinis|galline|chicken masters/i, 'volaille']];
+function suggestionsLigne(l, n = 6, f) {
   const a = motsRef(l && l.designation); if (!a.length) return [];
+  const fourn = f ? f.fournisseur || '' : ''; const esp = new Set(); (ESPECE_FOURNISSEUR.find(([re]) => re.test(fourn)) || [])[1] && esp.add(ESPECE_FOURNISSEUR.find(([re]) => re.test(fourn))[1]);
+  if (fourn) Store.all('liaisons').filter(x => x.fournisseur === fourn && x.produitId).forEach(x => { const q = Store.get('produits', x.produitId); if (q && q.espece) esp.add(q.espece); });
   return Store.all('produits').filter(p => p.actif !== false).map(p => {
-    const b = motsRef(p.name); let s = 0;
+    const b = motsRef(p.name); let s = esp.size && esp.has(p.espece) ? 1.5 : 0;
     b.forEach(w => { if (a.includes(w)) s += w === a[0] ? 3 : 2; else if (a.some(x => x.length > 3 && w.length > 3 && (x.startsWith(w) || w.startsWith(x)))) s += 1; else s -= 1; });
     return { p, s };
-  }).filter(x => x.s >= 1.5).sort((x, y) => y.s - x.s || x.p.name.localeCompare(y.p.name, 'fr')).slice(0, n).map(x => x.p);
+  }).filter(x => x.s >= 2).sort((x, y) => y.s - x.s || x.p.name.localeCompare(y.p.name, 'fr')).slice(0, n).map(x => x.p);
 }
 const LierOpts = { id: null, i: 0, q: '' };
 const boutonProduit = (p, li, sugg) => `<button class="lier-prod${sugg ? ' sugg' : ''}${li && li.produitId === p.id ? ' on' : ''}" data-act="factlierchoix" data-pid="${esc(p.id)}">${esc(p.name)}<small>${p.unit === 'kg' ? 'au kg' : 'à la pièce'}${p.price != null ? ' · ' + esc(fmtMoney(p.price)) : ''}</small></button>`;
@@ -3600,21 +3604,21 @@ function listeLiaison() {
 function ouvrirLiaison(id, i) {
   const f = Store.get('factures', id); const l = f && Array.isArray(f.lignes) ? f.lignes[i] : null; if (!l) return;
   Object.assign(LierOpts, { id, i: +i, q: '' });
-  const li = liaisonDe(f, l); const sug = suggestionsLigne(l);
+  const li = liaisonDe(f, l); const sug = suggestionsLigne(l, 6, f);
   const qte = [l.qte != null ? fmtQty(l.qte) + ' ' + (l.unite || '') : '', l.pieces && l.unite === 'kg' ? l.pieces + ' pièces' : '', l.colis ? l.colis + ' colis' : ''].filter(Boolean).join(' · ');
   const body = `<div class="stack">
     <div class="lier-head"><div class="eyebrow">${esc(f.fournisseur || '')}${l.ref ? ' · réf. ' + esc(l.ref) : ''}</div><div style="font-weight:800;font-size:1.1rem;margin:2px 0">${esc(l.designation || '')}</div><div class="muted">${esc(qte)}${l.pu != null ? ' · ' + esc(fmtMoney(l.pu)) + (l.unite === 'kg' ? ' le kg' : '') + ' HT' : ''}</div></div>
     ${sug.length ? `<div><div class="eyebrow">C'est sûrement…</div><div class="lier-grid">${sug.map(p => boutonProduit(p, li, true)).join('')}</div></div>` : ''}
     <div><div class="eyebrow">Tous les produits</div><input class="input" type="search" placeholder="Chercher un produit…" data-on="liersearch" autocomplete="off" style="margin:6px 0 4px"><div id="lier-list">${listeLiaison()}</div></div>
   </div>`;
-  openModal({ title: li ? 'Changer le produit relié' : 'Relier à un de vos produits', body, footer: `<button class="btn" data-act="factopen" data-id="${esc(id)}">← Retour à la facture</button>${li ? `<button class="btn btn-danger" data-act="factdelier" data-id="${esc(id)}" data-i="${i}">Défaire</button>` : ''}<button class="btn" data-act="factlierignore" data-id="${esc(id)}" data-i="${i}">Pas suivi en stock</button>` });
+  openModal({ title: li ? 'Changer le produit relié' : 'Relier à un de vos produits', body, footer: `<button class="btn" data-act="factopen" data-id="${esc(id)}">← Retour à la facture</button>${li ? `<button class="btn btn-danger" data-act="factdelier" data-id="${esc(id)}" data-i="${i}">Défaire</button>` : ''}<button class="btn" data-act="factlierfrais" data-id="${esc(id)}" data-i="${i}">Frais : ajouter au prix d'achat</button><button class="btn" data-act="factlierignore" data-id="${esc(id)}" data-i="${i}">Pas suivi en stock</button>` });
 }
-async function lierLigne(id, i, pid, ignore) {
+async function lierLigne(id, i, pid, ignore, frais) {
   const f = Store.get('factures', id); const l = f && Array.isArray(f.lignes) ? f.lignes[i] : null; if (!l) return;
   const key = cleLigne(f, l); const prev = Store.get('liaisons', key); const p = pid ? Store.get('produits', pid) : null;
   if (pid && !p) { toast('Produit introuvable', 'err'); return; }
-  await Store.set('liaisons', key, { fournisseur: f.fournisseur || '', ref: l.ref || '', ean: l.ean || '', designation: l.designation || '', unite: l.unite || '', produitId: p ? p.id : '', produitNom: p ? p.name : '', ignore: !p && !!ignore, factureId: id, cree: (prev && prev.cree) || new Date().toISOString(), maj: new Date().toISOString() });
-  toast(p ? `Relié : ${l.designation} → ${p.name}` : 'Noté : cette ligne ne compte pas dans le stock', 'ok');
+  await Store.set('liaisons', key, { fournisseur: f.fournisseur || '', ref: l.ref || '', ean: l.ean || '', designation: l.designation || '', unite: l.unite || '', produitId: p ? p.id : '', produitNom: p ? p.name : '', ignore: !p && !!ignore && !frais, frais: !p && !!frais, factureId: id, cree: (prev && prev.cree) || new Date().toISOString(), maj: new Date().toISOString() });
+  toast(p ? `Relié : ${l.designation} → ${p.name}` : frais ? 'Noté : frais ajoutés au prix d\'achat des produits de la facture' : 'Noté : cette ligne ne compte pas dans le stock', 'ok');
   if (stockPossible(Store.get('factures', id))) await mettreEnStock(id);
   ouvrirFacture(id);
 }
@@ -3626,11 +3630,17 @@ Object.assign(Inputs, { liersearch: el => { LierOpts.q = el.value; const box = $
 const tauxTvaFacture = f => { const d = Array.isArray(f && f.tvaDetail) ? f.tvaDetail : []; return d.length === 1 ? num(d[0].taux) : null; };
 function lignesStock(f) {
   const out = []; if (!f || !Array.isArray(f.lignes)) return out;
+  let frais = 0;
   f.lignes.forEach((l, i) => {
-    const li = liaisonDe(f, l); if (!li || li.ignore || !li.produitId) return;
+    const li = liaisonDe(f, l); if (li && li.frais) { frais += num(l.montant) || 0; return; }
+    if (!li || li.ignore || !li.produitId) return;
     const p = Store.get('produits', li.produitId); const q = qteStockLigne(l, p);
-    const m = num(l.montant);
-    out.push({ i, l, p, qte: q, unite: p && p.unit === 'kg' ? 'kg' : 'piece', achatHT: q > 0 && m != null ? Math.round(m / q * 10000) / 10000 : (num(l.pu) != null ? num(l.pu) : null) });
+    out.push({ i, l, p, qte: q, unite: p && p.unit === 'kg' ? 'kg' : 'piece', montant: num(l.montant) });
+  });
+  const base = out.reduce((a, x) => a + (x.montant || 0), 0);
+  out.forEach(x => {
+    const part = frais && base > 0 && x.montant != null ? frais * x.montant / base : 0; x.frais = Math.round(part * 100) / 100;
+    x.achatHT = x.qte > 0 && x.montant != null ? Math.round((x.montant + part) / x.qte * 10000) / 10000 : (num(x.l.pu) != null ? num(x.l.pu) : null);
   });
   return out;
 }
@@ -3713,6 +3723,7 @@ Object.assign(Actions, {
   factdestock: el => annulerStock(el.dataset.id),
   factlierchoix: el => lierLigne(LierOpts.id, LierOpts.i, el.dataset.pid),
   factlierignore: el => lierLigne(el.dataset.id, +el.dataset.i, null, true),
+  factlierfrais: el => lierLigne(el.dataset.id, +el.dataset.i, null, false, true),
   factdelier: async el => { const f = Store.get('factures', el.dataset.id); const l = f && Array.isArray(f.lignes) ? f.lignes[+el.dataset.i] : null; if (!l) return; await Store.remove('liaisons', cleLigne(f, l)); toast('Liaison défaite'); ouvrirFacture(el.dataset.id); },
   factpdf: () => $('#file-pdf').click(),
   factopen: el => ouvrirFacture(el.dataset.id),
