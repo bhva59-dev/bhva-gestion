@@ -905,7 +905,7 @@ function navBadges() {
   const b = {}; const t = todayStr();
   const cmd = Store.all('commandes').filter(c => c.statut !== 'retiree' && c.date === t).length; if (cmd) b.commandes = cmd;
   const dl = dlcItems().filter(x => !x.traite && x.jours <= 1).length; if (dl) b.dlc = dl;
-  const fa = Store.all('factures').filter(f => f.type === 'facture' && f.statut !== 'payee' && f.echeance && f.echeance <= t).length; if (fa) b.factures = fa;
+  const fa = Store.all('factures').filter(f => !f.ecarte && f.type === 'facture' && f.statut !== 'payee' && f.echeance && f.echeance <= t).length; if (fa) b.factures = fa;
   const q = PriceQueue.items.reduce((s, x) => s + x.copies, 0); if (q) b.prix = q;
   const st = Store.all('stock').filter(s => s.min != null && s.qte != null && s.qte <= s.min).length; if (st) b.stocks = st;
   return b;
@@ -2763,7 +2763,7 @@ const FactEngine = (() => {
   /* ---------- lecture complète ---------- */
   function lire(gabarits, pages, info = {}) {
     const texte = texteDe(pages);
-    const nat = nature(texte, info);
+    const nat = info.force ? 'facture' : nature(texte, info);   // force : l'utilisateur a dit « c'est bien une facture »
     if (nat !== 'facture') return { lu: 'ignore', nature: nat, note: NATURE_LIBELLE[nat] || 'pas une facture' };
     const vide = texte.replace(/\s/g, '').length < 30;
     if (vide) return { lu: 'scan', texte: '', note: 'PDF scanné sans texte' };
@@ -2775,7 +2775,7 @@ const FactEngine = (() => {
     if (g) { r.gabarit = cle; if (typeof g.nom === 'string') r.fournisseur = g.nom; else if (!r.fournisseur && g.nomDefaut) r.fournisseur = g.nomDefaut; }
     // avoir (note de crédit)
     if (!r.type && (/^\s*(?:AVOIR|NOTE DE CR[EÉ]DIT|CREDIT NOTE)\b/im.test(texte) || (r.ttc != null && r.ttc < 0))) r.type = 'avoir';
-    if (r.type === 'avoir') return { lu: 'ignore', nature: 'avoir', note: 'avoir (pas une facture)' };
+    if (r.type === 'avoir' && !info.force) return { lu: 'ignore', nature: 'avoir', note: 'avoir (pas une facture)' };
     // compléter / contrôler les totaux
     if (r.ht == null && r.ttc != null && r.tvaMontant != null) r.ht = r2(r.ttc - r.tvaMontant - (r.consignes || 0));
     if (r.tvaMontant == null && r.ttc != null && r.ht != null) r.tvaMontant = r2(r.ttc - r.ht);
@@ -2786,7 +2786,7 @@ const FactEngine = (() => {
     } else if (r.ht && r.tvaMontant != null) {
       const t = r.tvaMontant / r.ht * 100; const conn = [0, 2.1, 5.5, 6, 10, 20, 21, 8, 23].find(x => Math.abs(x - t) < 0.15); r.tva = conn != null ? conn : r2(t);
     }
-    if (info.nom && /conditions|cgv|catalogue|tarif|promotion/i.test(info.nom) && r.ttc == null) return { lu: 'ignore', note: 'Pas une facture' };
+    if (!info.force && info.nom && /conditions|cgv|catalogue|tarif|promotion/i.test(info.nom) && r.ttc == null) return { lu: 'ignore', note: 'Pas une facture' };
     const ok = r.ttc != null && r.ht != null && r.tvaMontant != null && Math.abs(r.ht + r.tvaMontant + (r.consignes || 0) - r.ttc) <= 0.06 && !!r.numero && !!r.date;
     r.lu = ok ? 'ok' : 'a_verifier';
     if (r.lignes && r.lignes.length && (r.ht != null || r.htMarchandise != null)) {
@@ -2805,7 +2805,7 @@ if (typeof module !== 'undefined') module.exports = FactEngine;
    où lire le numéro, la date, l'échéance, le total HT, la TVA (taux et montants), le TTC et les lignes.
    Quand on améliore un gabarit, on augmente GABARITS_VERSION : l'appli relit alors toute seule
    les factures déjà importées (sauf celles corrigées à la main). */
-const GABARITS_VERSION = 8;
+const GABARITS_VERSION = 9;
 const GABARITS = (() => {
   const M = FactEngine.montant, MS = FactEngine.montants, D = FactEngine.dateIso, cols = FactEngine.cols;
   const TAUX = [2.1, 5.5, 6, 10, 20, 21, 0];
@@ -2949,7 +2949,8 @@ const GABARITS = (() => {
       numero: /N[°º] Fact\s+(\d+)/, date: /^Date\s+(\d{2}\/\d{2}\/\d{2})\s+N[°º] Fact/m, echeance: /NET le\s+(\d{2}\/\d{2}\/\d{2})/,
       ht: /TOT HT\s+([\d ]*\d,\d{2})/, tvaMontant: /TOT TVA\s+([\d ]*\d,\d{2})/, ttc: /%\s{2,}[\d ]*\d,\d{2}\s{2,}([\d ]*\d,\d{2})\s*EUR/,
       tvaDetail: (p, t) => [...t.matchAll(/(\d[\d ]*,\d{2})\s+\d\s{2,}(\d+,\d{2})%\s{2,}(\d[\d ]*,\d{2})/g)].map(m => ({ base: M(m[1]), taux: M(m[2]), montant: M(m[3]) })),
-      lignes: (pages) => lignesPar(pages, /^(\d{4})\s{2,}(\d{6})\s{2,}(.+?)\s{2,}(\d{13})\s+(-?\d+)\s+(-?\d+,\d{3})\s{2,}([KUP])\s{2,}(\d+,\d{3})\s*[#*]?\s{2,}(-?\d[\d ]*,\d{2})/, (m) => ({ ref: m[2], ean: m[4], designation: m[3].trim(), qte: m[7] === 'K' ? M(m[6]) : +m[5], unite: m[7] === 'K' ? 'kg' : 'pièce', colis: +m[5], pu: M(m[8]), montant: M(m[9]) }))
+      // colonnes : FAM. ARTICLE DÉSIGNATION EAN QTE(pièces) POIDS U/V PRIX-U-NET [#promo] MONTANT-HT COL TVA (espaces simples ou multiples selon les factures)
+      lignes: (pages) => lignesPar(pages, /^(\d{4})\s+(\d{6})\s+(.+?)\s+(\d{13})\s+(-?\d+)\s+(-?\d+,\d{3})\s+([KUP])\s+(\d+,\d{3})\s*[#*]?\s+(-?\d[\d ]*,\d{2})(?:\s+(\d+))?/, (m) => ({ ref: m[2], ean: m[4], designation: m[3].trim(), qte: m[7] === 'K' ? M(m[6]) : +m[5], unite: m[7] === 'K' ? 'kg' : 'pièce', pieces: +m[5], poids: M(m[6]), colis: m[10] != null ? +m[10] : null, pu: M(m[8]), montant: M(m[9]) }))
     },
 
     /* ---------- Matanza (Belgique, viande) ---------- */
@@ -3194,13 +3195,14 @@ async function lireFacture(f) {
   const lib = await chargerPdfJs();
   const octets = await FactPdf.get(f);
   const pages = await FactEngine.lirePdf(lib, octets.slice());
-  const r = FactEngine.lire(GABARITS, pages, { email: f.mail && f.mail.email, sujet: f.mail && f.mail.sujet, nom: f.pdf && f.pdf.nom });
-  if (r.lu === 'ignore') {   // relevé, relance, liste de prix, bon de livraison, conditions générales… : ce n'est pas une facture
-    await FactPdf.remove(f); await Store.remove('factures', f.id);
-    toast(`Retiré : ${f.fournisseur || 'document'} (${r.note || 'pas une facture'})`);
+  const r = FactEngine.lire(GABARITS, pages, { email: f.mail && f.mail.email, sujet: f.mail && f.mail.sujet, nom: f.pdf && f.pdf.nom, force: !!f.force });
+  if (r.lu === 'ignore') {   // avoir, relevé, relance, liste de prix, bon de livraison… : pas une facture → mis de côté (jamais effacé, on peut toujours le revoir)
+    await Store.patch('factures', f.id, { lu: 'ignore', ecarte: r.nature || 'autre', luNote: r.note || 'pas une facture', luLe: new Date().toISOString(), luVersion: GABARITS_VERSION });
+    toast(`Mis de côté : ${f.fournisseur || 'document'} (${r.note || 'pas une facture'})`);
     return;
   }
   const patch = { lu: r.lu, luLe: new Date().toISOString(), luVersion: GABARITS_VERSION };
+  if (f.ecarte) patch.ecarte = null;
   for (const k of ['numero', 'date', 'echeance', 'fournisseur', 'gabarit', 'type']) if (r[k]) patch[k] = r[k];
   const regle = f.source === 'mail' && f.mail ? regleFacture(f.mail.email, f.mail.sujet) : null;
   if (regle) patch.fournisseur = regle.f;   // le nom officiel du fournisseur, d'après son mail de facture
@@ -3300,7 +3302,7 @@ function ouvrirFacture(id) {
       <div><span class="k">Statut</span><b>${f.type === 'avoir' ? 'Avoir' : f.statut === 'payee' ? 'Payée' : 'À payer'}</b></div>
     </div>
     ${tvaD.length ? `<div class="card-sub"><div class="eyebrow">Détail TVA</div><table class="table"><thead><tr><th>Taux</th><th class="right">Base HT</th><th class="right">TVA</th></tr></thead><tbody>${tvaD.map(t => `<tr><td>${esc(String(t.taux).replace('.', ','))} %</td><td class="right num">${esc(fmtMoney(t.base))}</td><td class="right num">${esc(fmtMoney(t.montant))}</td></tr>`).join('')}</tbody></table></div>` : ''}
-    ${lignes.length ? `<div class="card-sub"><div class="eyebrow">Lignes de la facture (${lignes.length})${f.lignesOk === false ? ' · <span class="pill pill-warn">total à vérifier</span>' : ''}</div><div class="table-wrap"><table class="table"><thead><tr><th>Réf.</th><th>Désignation</th><th class="right">Qté</th><th class="right">PU HT</th><th class="right">Montant</th></tr></thead><tbody>${lignes.map(l => `<tr><td class="muted">${esc(l.ref || '')}</td><td>${esc(l.designation || '')}</td><td class="right num">${esc(l.qte != null ? fmtQty(l.qte) : '')}${l.unite ? ' ' + esc(l.unite) : ''}</td><td class="right num">${esc(l.pu != null ? fmtMoney(l.pu) : '')}</td><td class="right num">${esc(l.montant != null ? fmtMoney(l.montant) : '')}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
+    ${lignes.length ? `<div class="card-sub"><div class="eyebrow">Lignes de la facture (${lignes.length})${f.lignesOk === false ? ' · <span class="pill pill-warn">total à vérifier</span>' : ''}</div><div class="table-wrap"><table class="table"><thead><tr><th>Réf.</th><th>Désignation</th><th class="right">Qté</th><th class="right">PU HT</th><th class="right">Montant</th></tr></thead><tbody>${lignes.map(l => `<tr><td class="muted">${esc(l.ref || '')}</td><td>${esc(l.designation || '')}</td><td class="right num">${esc(l.qte != null ? fmtQty(l.qte) : '')}${l.unite ? ' ' + esc(l.unite) : ''}${l.pieces && l.unite === 'kg' ? ` <small class="muted">(${esc(String(l.pieces))} p.)</small>` : ''}</td><td class="right num">${esc(l.pu != null ? fmtMoney(l.pu) : '')}</td><td class="right num">${esc(l.montant != null ? fmtMoney(l.montant) : '')}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
     ${f.mail ? `<p class="help">Mail : « ${esc(f.mail.sujet || '')} » de ${esc(f.mail.de || '')}</p>` : ''}
   </div>`;
   openModal({ title: `${f.fournisseur || 'Facture'}${f.numero ? ' · n° ' + f.numero : ''}`, body, footer: `${f.pdf ? `<button class="btn btn-xl" data-act="pdfview" data-id="${esc(id)}">📄 Voir le PDF</button>` : ''}${f.pdf ? `<button class="btn" data-act="factrelire" data-id="${esc(id)}">↻ Relire</button>` : ''}<button class="btn" data-act="editfact" data-id="${esc(id)}">${I.pencil} Corriger</button><button class="btn btn-primary" data-close="1">Fermer</button>` });
@@ -3309,7 +3311,8 @@ function ouvrirFacture(id) {
 /* ---------- écran Factures (remplace l'ancien) ---------- */
 Object.assign(FactOpts, { q: '' });
 Views.factures = function () {
-  const t = todayStr(); let all = Store.all('factures');
+  const t = todayStr(); const tous = Store.all('factures');
+  const ecartes = tous.filter(f => f.ecarte); let all = tous.filter(f => !f.ecarte);   // avoirs, relevés… mis de côté : jamais dans la liste
   const month = t.slice(0, 7);
   const estF = f => f.type === 'facture';
   const totalMois = all.filter(f => estF(f) && (f.date || '').startsWith(month)).reduce((s, f) => s + (num(f.ttc) || 0), 0);
@@ -3328,13 +3331,22 @@ Views.factures = function () {
     <div class="toolbar"><button class="btn btn-xl" data-act="factpdf">📄 Ajouter des PDF</button><button class="btn btn-xl" data-act="newfact" data-type="bl">${I.camera} Bon de livraison</button><button class="btn btn-xl btn-primary" data-act="newfact" data-type="facture">${I.camera} Facture</button></div></div>
   <div class="stats"><div class="stat"><span class="v num">${esc(fmtMoney(totalMois))}</span><span class="k">factures du mois (TTC)</span></div><div class="stat ${aPayer ? 'alert' : ''}"><span class="v num">${esc(fmtMoney(aPayer))}</span><span class="k">reste à payer</span></div><div class="stat ${echues ? 'alert' : ''}"><span class="v num">${echues}</span><span class="k">factures échues</span></div><div class="stat ${aVerif ? 'alert' : ''}" data-act="facttype" data-v="verif" style="cursor:pointer"><span class="v num">${aVerif}</span><span class="k">à vérifier</span></div></div>
   <div class="card"><div class="card-head" style="flex-wrap:wrap;gap:10px"><div class="seg"><button class="${FactOpts.type === 'tous' ? 'on' : ''}" data-act="facttype" data-v="tous">Tout</button><button class="${FactOpts.type === 'facture' ? 'on' : ''}" data-act="facttype" data-v="facture">Factures</button><button class="${FactOpts.type === 'avoir' ? 'on' : ''}" data-act="facttype" data-v="avoir">Avoirs</button><button class="${FactOpts.type === 'bl' ? 'on' : ''}" data-act="facttype" data-v="bl">BL</button><button class="${FactOpts.type === 'verif' ? 'on' : ''}" data-act="facttype" data-v="verif">À vérifier</button></div><div class="seg"><button class="${FactOpts.statut === 'tous' ? 'on' : ''}" data-act="factstatut" data-v="tous">Tous statuts</button><button class="${FactOpts.statut === 'a_payer' ? 'on' : ''}" data-act="factstatut" data-v="a_payer">À payer</button><button class="${FactOpts.statut === 'payee' ? 'on' : ''}" data-act="factstatut" data-v="payee">Payées</button></div><input class="input" type="search" placeholder="Rechercher fournisseur, n°…" value="${esc(FactOpts.q || '')}" data-on="factsearch" style="max-width:260px"></div>
-  ${list.length ? `<div class="list">${list.map(item).join('')}</div>` : `<div class="empty"><strong>Aucune facture pour l'instant.</strong><span>Les factures reçues par mail à partir du 31 octobre 2026 arriveront ici toutes seules.</span></div>`}</div>`;
+  ${list.length ? `<div class="list">${list.map(item).join('')}</div>` : `<div class="empty"><strong>Aucune facture pour l'instant.</strong><span>Les factures reçues par mail à partir du 31 octobre 2026 arriveront ici toutes seules.</span></div>`}
+  ${ecartes.length ? `<p class="help" style="margin:14px 0 0"><button class="btn btn-sm" data-act="factecartes">${ecartes.length} document${ecartes.length > 1 ? 's' : ''} mis de côté (pas une facture) — voir</button></p>` : ''}</div>`;
 };
+const ECARTE_LIBELLE = { avoir: 'Avoir', releve: 'Relevé de compte', relance: 'Relance / rappel', tarif: 'Liste de prix', bl: 'Bon de livraison', commande: 'Devis / commande', autre: 'Pas une facture' };
+function ouvrirEcartes() {
+  const L = Store.all('factures').filter(f => f.ecarte).sort((a, b) => String(b.cree || '').localeCompare(String(a.cree || '')));
+  if (!L.length) { closeModal(); return; }
+  openModal({ title: 'Documents mis de côté', body: `<p class="help">Reçus avec les factures, mais ce ne sont pas des factures : ils ne comptent nulle part. Si l'un d'eux est quand même une facture, touchez « C'est une facture ».</p><div class="list">${L.map(f => `<div class="list-item"><span class="photo-thumb fact-ico" data-act="pdfview" data-id="${f.id}">📄</span><div class="main"><div class="title"><span class="pill pill-neutral">${esc(ECARTE_LIBELLE[f.ecarte] || 'Pas une facture')}</span> ${esc(f.fournisseur || '')}${f.numero ? ` <span class="muted">n° ${esc(f.numero)}</span>` : ''}</div><div class="sub">${esc(f.mail && f.mail.date ? 'reçu le ' + fmtDate(f.mail.date.slice(0, 10)) : fmtDate(f.date))}${f.mail && f.mail.sujet ? ' · ' + esc(f.mail.sujet) : ''}</div></div><button class="btn btn-sm" data-act="pdfview" data-id="${f.id}">Voir</button><button class="btn btn-sm btn-dark" data-act="factforcer" data-id="${f.id}">C'est une facture</button></div>`).join('')}</div>`, footer: `<button class="btn btn-primary" data-close="1">Fermer</button>` });
+}
 Object.assign(Actions, {
   factpdf: () => $('#file-pdf').click(),
   factopen: el => ouvrirFacture(el.dataset.id),
   pdfview: el => voirPdf(el.dataset.id),
   pdfshare: el => partagerPdf(el.dataset.id),
+  factecartes: () => ouvrirEcartes(),
+  factforcer: async el => { const id = el.dataset.id; await Store.patch('factures', id, { ecarte: null, force: true, lu: 'a_lire' }); toast('Remis dans les factures, lecture…', 'ok'); ouvrirEcartes(); FactLecture.planifier(); },
   factrelire: async el => { const id = el.dataset.id; await Store.patch('factures', id, { lu: 'a_lire' }); closeModal(); toast('Relecture…'); FactLecture.planifier(); },
   delfact: async el => { if (await confirmDialog('Supprimer ce document ?', { danger: true, ok: 'Supprimer' })) { const f = Store.get('factures', el.dataset.id); if (f) await FactPdf.remove(f); await Store.remove('factures', el.dataset.id); closeModal(); } }
 });

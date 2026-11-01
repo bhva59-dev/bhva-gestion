@@ -9,7 +9,9 @@
  *      bon expéditeur + bon objet + bon nom de PDF) ;
  *   2. copie le PDF de la facture dans l'appli BHVA (rubrique Factures) ;
  *   3. ne crée jamais deux fois la même facture (empreinte du fichier) ;
- *   4. range le mail sous le libellé « BHVA-importee ».
+ *   4. range le mail sous le libellé « BHVA-importee » ;
+ *   5. envoie une notification sur le téléphone (appli gratuite ntfy) pour chaque nouvelle facture :
+ *      la toucher ouvre la conversation avec Claude pour la traiter (fournisseur, gabarit, références → produits).
  * Relevés, relances, avoirs, bons de livraison, cours, devis… ne sont jamais pris.
  * Nouveau fournisseur : ajouter une ligne dans MAILS_FACTURES.
  */
@@ -20,7 +22,10 @@ const CONFIG = {
   LIBELLE: 'BHVA-importee',
   PROJET: 'bhva-gestion',
   CLE_API: 'AIzaSyAuEx9IUK0JdWXJeLgFj86IB0-KCdwaf4U', // clé publique de l'appli (déjà visible dans le site)
-  TAILLE_MORCEAU: 900000     // découpe des PDF pour la base (limite 1 Mo par fiche)
+  TAILLE_MORCEAU: 900000,    // découpe des PDF pour la base (limite 1 Mo par fiche)
+  NTFY_SUJET: 'bhva-elfen-prix-7q4m2x',                                     // notifications (même sujet que les alertes de prix)
+  LIEN_CLAUDE: 'https://claude.ai/code/session_01BNsuqZrN2rKS1DoCx9XsG5',  // ouvert en touchant la notification
+  LIEN_APPLI: 'https://bhva59-dev.github.io/bhva-gestion/#factures'
 };
 
 /* ===================== Les mails de factures (liste blanche) =====================
@@ -28,12 +33,12 @@ const CONFIG = {
    Une facture n'est prise QUE si le mail vient de cet expéditeur, avec cet objet, et que le PDF porte ce nom.
    Tout le reste (relevés, relances, avoirs, bons de livraison, cours, devis, documents du comptable…) est ignoré. */
 const MAILS_FACTURES = [
-  { f: 'LDC (Lionor)', q: 'noreply.factures.demat@ldc.fr', de: /^noreply\.factures\.demat@ldc\.fr$/i, sujet: /^\[LIONOR\] : Piece comptable numero/i, pdf: /__S__INVOIC__\d+__\d+\.pdf$/i },
+  { f: 'LDC (Lionor)', q: 'noreply.factures.demat@ldc.fr', de: /^noreply\.factures\.demat@ldc\.fr$/i, sujet: /^\[LIONOR\] : Piece comptable numero/i, pdf: /__S__INVOIC__\d+__\d+\.pdf$/i, mixte: true },
   { f: 'Prim&Co', q: 'caisse@primandco.fr', de: /^caisse@primandco\.fr$/i, sujet: /^SAS PRIM&CO - FACTURE N/i, pdf: /^FAC_\d+\.pdf$/i },
   { f: 'Le Conte', q: 'contact@lecontesas.fr', de: /^contact@lecontesas\.fr$/i, sujet: /^Votre facture num\S*ro FA\d+/i, pdf: /^Facture_FA\d+\.pdf$/i },
   { f: 'Sud Fresh', q: 'laure.sudfresh@orange.fr', de: /^laure\.sudfresh@orange\.fr$/i, sujet: /^SUD FRESH - FACTURE N/i, pdf: /^facture_\d+\.pdf$/i },
   { f: 'Lomme Primeurs', q: 'caisse@lomme-primeurs.com', de: /^caisse@lomme-primeurs\.com$/i, sujet: /^LOMME PRIMEURS - FACTURE N/i, pdf: /^facture_\d+\.pdf$/i },
-  { f: 'Tendriade', q: 'tendriade.fr', de: /^compta\.?client@tendriade\.fr$/i, sujet: /^Facture ou Avoir Tendriade invoicEDC_/i, pdf: /^invoicEDC_[\d_]+\.pdf$/i },
+  { f: 'Tendriade', q: 'tendriade.fr', de: /^compta\.?client@tendriade\.fr$/i, sujet: /^Facture ou Avoir Tendriade invoicEDC_/i, pdf: /^invoicEDC_[\d_]+\.pdf$/i, mixte: true },
   { f: 'Lagache', q: 'facturation@lagache-lomme.com', de: /^facturation@lagache-lomme\.com$/i, sujet: /^FACTURE N\S*\s*\d+\s*$/i, pdf: /^facture_\d+\.pdf$/i },
   { f: 'Sital', q: 'compta@sital.fr', de: /^compta@sital\.fr$/i, sujet: /^SITAL SAS - FACTURES?\s*$/i, pdf: /^facture_\d+\.pdf$/i },
   { f: 'Ameloot', q: 'factuur@ameloot.org', de: /^factuur@ameloot\.org$/i, sujet: /^Facture Omer Ameloot/i, pdf: /^FACT-\d+\.pdf$/i },
@@ -94,6 +99,7 @@ function importer_() {
   const verrou = LockService.getScriptLock();
   if (!verrou.tryLock(20000)) return 0;
   let nouvelles = 0;
+  const liste = [];   // les factures copiées pendant ce passage (pour la notification)
   try {
     const lib = libelle_();
     const expediteurs = Array.from(new Set(MAILS_FACTURES.map(r => r.q))).map(q => 'from:' + q).join(' OR ');
@@ -103,19 +109,55 @@ function importer_() {
     fils.forEach(fil => {
       let toutBon = true;
       fil.getMessages().forEach(msg => {
-        try { nouvelles += traiterMessage_(msg); } catch (e) { toutBon = false; Logger.log('Erreur ' + msg.getId() + ' : ' + e); }
+        try { nouvelles += traiterMessage_(msg, liste); } catch (e) { toutBon = false; Logger.log('Erreur ' + msg.getId() + ' : ' + e); }
       });
       if (toutBon) fil.addLabel(lib);
     });
-    PropertiesService.getScriptProperties().setProperty('dernier', String(Date.now()));
-    PropertiesService.getScriptProperties().setProperty('dernierResultat', new Date().toISOString() + ' · ' + nouvelles + ' nouvelle(s)');
+    const p = PropertiesService.getScriptProperties();
+    p.setProperty('dernier', String(Date.now()));
+    p.setProperty('dernierResultat', new Date().toISOString() + ' · ' + nouvelles + ' nouvelle(s)');
+    if (liste.length) {
+      let journal = []; try { journal = JSON.parse(p.getProperty('journal') || '[]'); } catch (e) { }
+      liste.forEach(x => journal.push({ le: new Date().toISOString(), f: x.f, sujet: x.sujet, recu: x.date.toISOString() }));
+      p.setProperty('journal', JSON.stringify(journal.slice(-30)));
+    }
   } finally {
     verrou.releaseLock();
   }
+  if (liste.length) notifier_(liste);
   return nouvelles;
 }
 
-function traiterMessage_(msg) {
+/* Notification sur le téléphone (appli ntfy, gratuite) : une seule notification par passage, même s'il y a plusieurs factures.
+   La nuit (21 h – 7 h) elle arrive sans sonner. La toucher ouvre la conversation avec Claude. */
+function notifier_(liste) {
+  if (!CONFIG.NTFY_SUJET || !liste.length) return;
+  const tz = 'Europe/Paris';
+  const heure = Number(Utilities.formatDate(new Date(), tz, 'H'));
+  const nuit = heure >= 21 || heure < 7;
+  let titre, message, tag;
+  if (liste.length === 1) {
+    const x = liste[0];
+    titre = (x.mixte ? 'Nouveau document : ' : 'Nouvelle facture : ') + x.f;
+    message = x.sujet + '\nReçu le ' + Utilities.formatDate(x.date, tz, "dd/MM 'à' HH:mm") + ' · touche pour le traiter avec Claude';
+    tag = x.mixte ? 'page_facing_up' : 'receipt';
+  } else {
+    titre = liste.length + ' nouvelles factures';
+    message = liste.map(x => '• ' + x.f + ' : ' + x.sujet).join('\n') + '\nTouche pour les traiter avec Claude';
+    tag = 'receipt';
+  }
+  try {
+    UrlFetchApp.fetch('https://ntfy.sh', {
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      payload: JSON.stringify({
+        topic: CONFIG.NTFY_SUJET, title: titre, message: message, priority: nuit ? 2 : 4, tags: [tag], click: CONFIG.LIEN_CLAUDE,
+        actions: [{ action: 'view', label: 'Voir dans l\'appli', url: CONFIG.LIEN_APPLI }, { action: 'view', label: 'Ouvrir Claude', url: CONFIG.LIEN_CLAUDE }]
+      })
+    });
+  } catch (e) { Logger.log('Notification impossible : ' + e); }
+}
+
+function traiterMessage_(msg, liste) {
   const de = msg.getFrom();
   const email = ((de.match(/<([^>]+)>/) || [null, de])[1] || '').trim().toLowerCase();
   const sujet = msg.getSubject() || '';
@@ -144,6 +186,7 @@ function traiterMessage_(msg) {
       cree: new Date().toISOString()
     });
     n++;
+    if (liste) liste.push({ f: regle.f, sujet: sujet, date: msg.getDate(), mixte: !!regle.mixte });
   });
   return n;
 }
