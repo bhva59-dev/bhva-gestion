@@ -3485,13 +3485,14 @@ setInterval(() => FactLecture.planifier(), 20000);
 /* ---------- mise à jour automatique ----------
    Quand une nouvelle version est publiée, chaque appareil (iPad du comptoir, téléphone) se recharge tout seul
    au premier moment calme : pas de fenêtre ouverte, pas de saisie en cours, pas d'alerte qui sonne, pas d'enregistrement. */
-const APP_VERSION = '1aee8a94cd';
+const APP_VERSION = 'd811500673';
 const MiseAJour = {
   attente: null, _t: 0,
   async verifier() {
     if (location.protocol !== 'https:' || APP_VERSION.startsWith('__')) return;
     try {
       const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;
+      verifierHorloge(r.headers.get('date'));
       const v = String((await r.json()).v || ''); if (!v || v === APP_VERSION) return;
       let deja = null; try { deja = sessionStorage.getItem('majTentee'); } catch (e) { }
       if (deja === v) return;   // déjà rechargé pour cette version : on n'insiste pas (évite une boucle si un cache traîne)
@@ -3514,6 +3515,15 @@ const MiseAJour = {
 };
 setTimeout(() => MiseAJour.verifier(), 20000); setInterval(() => MiseAJour.verifier(), 3 * 60 * 1000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') MiseAJour.verifier(); });
+/* horloge de l'appareil : si elle est fausse (plus de 5 min d'écart avec le serveur), bandeau rouge pour la corriger,
+   car les dates des relevés, températures, traçabilité et ventes viennent de l'horloge de l'appareil */
+function verifierHorloge(entete) {
+  const t = Date.parse(entete || ''); if (!t) return; const ecart = Date.now() - t; let b = document.getElementById('horloge-faussee');
+  if (Math.abs(ecart) < 5 * 60 * 1000) { if (b) b.remove(); return; }
+  const h = Math.round(Math.abs(ecart) / 3600000 * 10) / 10; const txt = `⚠️ L'heure de cet appareil est fausse (${ecart > 0 ? 'en avance' : 'en retard'} de ${h >= 1 ? String(h).replace('.', ',') + ' h' : Math.round(Math.abs(ecart) / 60000) + ' min'}) : les dates enregistrées seront fausses. Réglages → Général → Date et heure → activer « Réglage automatique ».`;
+  if (!b) { b = document.createElement('div'); b.id = 'horloge-faussee'; b.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9998;background:#d03b3b;color:#fff;font-weight:700;padding:12px 16px;text-align:center;font-size:1rem;line-height:1.35'; document.body.appendChild(b); }
+  b.textContent = txt;
+}
 /* chaque appareil indique sa version (pour savoir qu'aucun appareil n'est resté sur une vieille version) */
 async function signalerAppareil() {
   if (Store.mode !== 'firebase' || !Store.fb) return;
