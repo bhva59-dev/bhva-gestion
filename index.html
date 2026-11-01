@@ -1939,9 +1939,12 @@ async function stockMove(pid, type, qte, unite, ref) {
   await Store.set('mouvements', 'm-' + uid(), { date: todayStr(), t: nowTime(), produitId: pid, produitNom: p.name, type, qte, unite: st.unite || unite, ref: ref || '', cree: new Date().toISOString() });
 }
 /* marge d'un produit : prix d'achat HT (dernière facture) → prix de vente TTC de l'affichage des prix */
+/* TVA de la VENTE : celle du produit si elle est renseignée, sinon celle de la facture d'achat si elle n'est pas nulle
+   (facture belge en autoliquidation = 0 %), sinon 5,5 % (alimentaire) */
+const tvaVente = (p, st) => num(p && p.tva) != null ? num(p.tva) : (st && num(st.achatTva) > 0 ? num(st.achatTva) : 5.5);
 function margeProduit(p, st) {
   const achat = st ? num(st.achatHT) : null, vente = p ? num(p.price) : null; if (achat == null || vente == null || !(achat > 0)) return null;
-  const tva = st && st.achatTva != null ? num(st.achatTva) : 5.5; const venteHT = vente / (1 + (tva || 0) / 100);
+  const tva = tvaVente(p, st); const venteHT = vente / (1 + (tva || 0) / 100);
   const marge = venteHT - achat; return { achat, vente, venteHT, tva, marge, taux: venteHT > 0 ? marge / venteHT : null, coef: vente / achat };
 }
 Views.stocks = function () {
@@ -1987,7 +1990,7 @@ async function saveStockMove(pid) { const f = $('#st-form'); if (!f.reportValidi
 const VentesOpts = { per: '7' };
 const r2 = n => Math.round(n * 100) / 100, r3 = n => Math.round(n * 1000) / 1000;
 function calcVente(p, st, qte, prixTTC) {
-  const tva = st && st.achatTva != null ? num(st.achatTva) : 5.5; const achat = st ? num(st.achatHT) : null;
+  const tva = tvaVente(p, st); const achat = st ? num(st.achatHT) : null;
   const caTTC = r2(qte * prixTTC), caHT = r2(caTTC / (1 + (tva || 0) / 100)), coutHT = achat != null ? r2(qte * achat) : null;
   return { tva, achatHT: achat, caTTC, caHT, coutHT, margeHT: coutHT != null ? r2(caHT - coutHT) : null };
 }
@@ -3470,7 +3473,7 @@ setInterval(() => FactLecture.planifier(), 20000);
 /* ---------- mise à jour automatique ----------
    Quand une nouvelle version est publiée, chaque appareil (iPad du comptoir, téléphone) se recharge tout seul
    au premier moment calme : pas de fenêtre ouverte, pas de saisie en cours, pas d'alerte qui sonne, pas d'enregistrement. */
-const APP_VERSION = '10919f440f';
+const APP_VERSION = '73e1ab9270';
 const MiseAJour = {
   attente: null, _t: 0,
   async verifier() {
