@@ -3484,7 +3484,7 @@ setInterval(() => FactLecture.planifier(), 20000);
 /* ---------- mise à jour automatique ----------
    Quand une nouvelle version est publiée, chaque appareil (iPad du comptoir, téléphone) se recharge tout seul
    au premier moment calme : pas de fenêtre ouverte, pas de saisie en cours, pas d'alerte qui sonne, pas d'enregistrement. */
-const APP_VERSION = 'd2cc683b72';
+const APP_VERSION = '1aee8a94cd';
 const MiseAJour = {
   attente: null, _t: 0,
   async verifier() {
@@ -3679,7 +3679,9 @@ async function mettreEnStock(id, manuel) {
   for (const x of L) {
     const st = Store.get('stock', x.p.id) || { qte: 0, unite: x.unite, min: null };
     const q = Math.round(((num(st.qte) || 0) + x.qte) * 1000) / 1000;
-    await Store.set('stock', x.p.id, Object.assign({}, st, { qte: q, unite: st.unite || x.unite, nom: x.p.name, maj: maintenant, achatHT: x.achatHT != null ? x.achatHT : (st.achatHT ?? null), achatTva: tva != null ? tva : (st.achatTva ?? null), achatLe: f.date || todayStr(), achatFournisseur: f.fournisseur || '', achatFacture: f.numero || '' }));
+    const avant = num(st.qte) || 0, pa = num(st.achatHT);   // prix d'achat moyen pondéré (stock restant + nouvelle entrée)
+    const achat = x.achatHT == null ? (pa ?? null) : (avant > 0 && pa != null ? Math.round((avant * pa + x.qte * x.achatHT) / (avant + x.qte) * 10000) / 10000 : x.achatHT);
+    await Store.set('stock', x.p.id, Object.assign({}, st, { qte: q, unite: st.unite || x.unite, nom: x.p.name, maj: maintenant, achatHT: achat, dernierAchatHT: x.achatHT ?? (st.dernierAchatHT ?? null), achatTva: tva != null ? tva : (st.achatTva ?? null), achatLe: f.date || todayStr(), achatFournisseur: f.fournisseur || '', achatFacture: f.numero || '' }));
     await Store.set('mouvements', 'mv-' + id + '-' + x.i, { date: todayStr(), t: nowTime(), produitId: x.p.id, produitNom: x.p.name, type: 'entree', qte: x.qte, unite: st.unite || x.unite, achatHT: x.achatHT, ref: `Facture ${f.fournisseur || ''}${f.numero ? ' n° ' + f.numero : ''}`, factureId: id, cree: maintenant });
   }
   f = Store.get('factures', id) || f;
