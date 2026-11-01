@@ -597,6 +597,7 @@ textarea.input{min-height:90px}
 .lier-prod small{font-weight:500;font-size:.8rem;opacity:.7}
 .lier-prod.sugg{border:2px solid var(--fg)}
 .lier-prod.on{background:var(--ok-soft);border-color:var(--ok);color:var(--ok)}
+.stat-cat{cursor:pointer}.stat-cat.on{outline:3px solid var(--accent);outline-offset:-1px}
 .stats.kpi{grid-template-columns:repeat(4,1fr)}.stats.kpi .v{white-space:nowrap;font-size:1.7rem}.stat.hero .v{font-size:3rem!important}.stat.hero{background:var(--surface-2)}
 .viz-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;margin-bottom:16px}
 .viz-card h2{margin:0 0 2px;font-size:1.05rem}.viz-card .sub{color:var(--fg-3);font-size:.86rem;margin-bottom:8px}
@@ -1083,7 +1084,7 @@ Views.accueil = function () {
   ];
   const small = [
     { id: 'evolution', t: 'Évolution des prix', n: priceChanges.length, k: 'sur 7 jours', alert: false },
-    { id: 'stocks', t: 'Stocks', n: enStock.length, k: stockLow ? `${stockLow} sous le seuil` : `produit${enStock.length > 1 ? 's' : ''} en stock${valStock ? ' · ' + fmtMoney(valStock) + ' HT' : ''}`, alert: stockLow > 0 },
+    { id: 'stocks', t: 'Stocks', n: enStock.length, k: stockLow ? `${stockLow} sous le seuil` : (stockParCategorie().filter(x => x.n).map(x => `${x.l} ${fmtMoney(x.v).replace(/,\d\d /, ' ')}`).join(' · ') || 'produits en stock'), alert: stockLow > 0 },
     { id: 'factures', t: 'Factures & BL', n: factAPayer.length, k: factDue ? `${factDue} échue${factDue > 1 ? 's' : ''}` : factRelier ? `${factRelier} référence${factRelier > 1 ? 's' : ''} à relier` : `à payer${factMontant ? ' · ' + fmtMoney(factMontant) : ''}`, alert: factDue > 0 || factRelier > 0 },
     { id: 'recettes', t: 'Recettes', n: Store.count('recettes'), k: 'fiches', alert: false },
     { id: 'gestion', t: 'Prix BHVA', n: '', k: 'application téléphone', alert: false },
@@ -1929,7 +1930,11 @@ async function saveFactForm(id) {
 }
 
 /* ===================== stocks ===================== */
-const StockOpts = { show: 'suivis', q: '' };
+const StockOpts = { show: 'suivis', q: '', cat: 'tous' };
+const CATS_STOCK = [['viande', 'Viande'], ['epicerie', 'Épicerie'], ['fruits', 'Fruits & légumes']];
+function stockParCategorie() {
+  return CATS_STOCK.map(([c, l]) => { const L = Store.all('stock').filter(x => num(x.qte) > 0 && (Store.get('produits', x.id) || {}).cat === c); return { c, l, n: L.length, v: Math.round(L.reduce((a, x) => a + (num(x.achatHT) != null ? num(x.qte) * num(x.achatHT) : 0), 0) * 100) / 100 }; });
+}
 async function stockMove(pid, type, qte, unite, ref) {
   const p = Store.get('produits', pid); if (!p) return;
   const st = Store.get('stock', pid) || { qte: 0, unite: unite || (p.unit === 'kg' ? 'kg' : 'piece'), min: null };
@@ -1951,10 +1956,10 @@ function margeProduit(p, st) {
 Views.stocks = function () {
   const prods = Store.all('produits').filter(p => p.actif !== false).sort((a, b) => (a.cat === 'viande' ? 0 : 1) - (b.cat === 'viande' ? 0 : 1) || a.name.localeCompare(b.name, 'fr'));
   const nq = normStr(StockOpts.q);
-  const rows = prods.map(p => ({ p, s: Store.get('stock', p.id) || { qte: null, min: null, unite: p.unit === 'kg' ? 'kg' : 'piece' } })).filter(r => (!nq || normStr(r.p.name).includes(nq)) && (StockOpts.show === 'tous' || (StockOpts.show === 'bas' ? (r.s.min != null && r.s.qte != null && r.s.qte <= r.s.min) : (r.s.qte != null))));
-  const moves = Store.all('mouvements').sort((a, b) => (b.cree || '').localeCompare(a.cree || '')).slice(0, 40);
+  const rows = prods.map(p => ({ p, s: Store.get('stock', p.id) || { qte: null, min: null, unite: p.unit === 'kg' ? 'kg' : 'piece' } })).filter(r => (StockOpts.cat === 'tous' || r.p.cat === StockOpts.cat) && (!nq || normStr(r.p.name).includes(nq)) && (StockOpts.show === 'tous' || (StockOpts.show === 'bas' ? (r.s.min != null && r.s.qte != null && r.s.qte <= r.s.min) : (r.s.qte != null))));
+  const moves = Store.all('mouvements').filter(m => StockOpts.cat === 'tous' || (Store.get('produits', m.produitId) || {}).cat === StockOpts.cat).sort((a, b) => (b.cree || '').localeCompare(a.cree || '')).slice(0, 40);
   const MV = { entree: ['Entrée', 'pill-ok'], sortie: ['Sortie', 'pill-info'], perte: ['Perte', 'pill-crit'], inventaire: ['Inventaire', 'pill-neutral'], vente: ['Vente', 'pill-info'] };
-  const suivis = Store.all('stock').filter(x => x.qte != null);
+  const suivis = Store.all('stock').filter(x => x.qte != null); const parCat = stockParCategorie();
   const valeur = suivis.reduce((t, x) => t + (num(x.qte) > 0 && num(x.achatHT) != null ? num(x.qte) * num(x.achatHT) : 0), 0);
   const u = x => UNIT_NAME[x] || x || '';
   const ligne = ({ p, s }) => {
@@ -1971,8 +1976,8 @@ Views.stocks = function () {
   };
   return `
   <div class="page-head"><div><div class="eyebrow">Réserve & chambre froide</div><h1>Gestion des stocks</h1><p class="lead">Les factures reliées à vos produits entrent toutes seules, avec le prix d'achat ; sorties, pertes, inventaire, seuils.</p></div>
-    <div class="toolbar"><div class="seg"><button class="${StockOpts.show === 'suivis' ? 'on' : ''}" data-act="stshow" data-v="suivis">En stock</button><button class="${StockOpts.show === 'bas' ? 'on' : ''}" data-act="stshow" data-v="bas">Sous le seuil</button><button class="${StockOpts.show === 'tous' ? 'on' : ''}" data-act="stshow" data-v="tous">Tous les produits</button></div><div class="search">${I.search}<input class="input" id="st-search" placeholder="Rechercher…" value="${esc(StockOpts.q)}" data-on="stsearch"></div></div></div>
-  <div class="stats"><div class="stat"><span class="v num">${suivis.length}</span><span class="k">produits suivis</span></div><div class="stat"><span class="v num">${esc(fmtMoney(valeur))}</span><span class="k">valeur du stock (prix d'achat HT)</span></div></div>
+    <div class="toolbar"><div class="seg">${[['tous', 'Tout'], ...CATS_STOCK].map(([c, l]) => `<button class="${StockOpts.cat === c ? 'on' : ''}" data-act="stcat" data-v="${c}">${l}</button>`).join('')}</div><div class="seg"><button class="${StockOpts.show === 'suivis' ? 'on' : ''}" data-act="stshow" data-v="suivis">En stock</button><button class="${StockOpts.show === 'bas' ? 'on' : ''}" data-act="stshow" data-v="bas">Sous le seuil</button><button class="${StockOpts.show === 'tous' ? 'on' : ''}" data-act="stshow" data-v="tous">Tous les produits</button></div><div class="search">${I.search}<input class="input" id="st-search" placeholder="Rechercher…" value="${esc(StockOpts.q)}" data-on="stsearch"></div></div></div>
+  <div class="stats">${parCat.map(x => `<div class="stat stat-cat ${StockOpts.cat === x.c ? 'on' : ''}" data-act="stcat" data-v="${x.c}"><span class="v num">${esc(fmtMoney(x.v))}</span><span class="k"><b>Stock ${esc(x.l.toLowerCase())}</b> · ${x.n} produit${x.n > 1 ? 's' : ''}</span></div>`).join('')}<div class="stat stat-cat ${StockOpts.cat === 'tous' ? 'on' : ''}" data-act="stcat" data-v="tous"><span class="v num">${esc(fmtMoney(valeur))}</span><span class="k"><b>Total</b> · valeur au prix d'achat HT</span></div></div>
   <div class="card">${rows.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Produit</th><th class="right">En stock</th><th class="right">Achat</th><th class="right">Vente</th><th class="right">Marge</th><th class="right">Valeur</th><th class="right">Seuil</th><th></th></tr></thead><tbody>${rows.map(ligne).join('')}</tbody></table></div>` : `<div class="empty"><strong>${StockOpts.show === 'bas' ? 'Aucun produit sous le seuil.' : StockOpts.show === 'suivis' ? 'Aucun produit en stock pour l\'instant.' : 'Aucun produit.'}</strong><span>${StockOpts.show === 'suivis' ? 'Les factures reliées à vos produits arrivent ici toutes seules, avec le prix d\'achat. « Tous les produits » pour faire une entrée ou un inventaire à la main.' : ''}</span></div>`}</div>
   <div class="card" style="margin-top:16px"><div class="card-head"><h2>Derniers mouvements</h2></div>${moves.length ? `<div class="list">${moves.map(m => `<div class="list-item"><span class="pill ${MV[m.type]?.[1] || 'pill-neutral'}">${esc(MV[m.type]?.[0] || m.type)}</span><div class="main"><div class="title">${esc(m.produitNom)} · <span class="num">${m.type === 'inventaire' ? '= ' : m.type === 'entree' ? '+' : '−'}${esc(fmtQty(m.qte))} ${esc(u(m.unite))}</span>${m.achatHT != null ? ` <span class="muted">à ${esc(fmtMoney(num(m.achatHT)))} HT</span>` : ''}</div><div class="sub">${esc(fmtDate(m.date))} ${esc(m.t || '')}${m.ref ? ' · ' + esc(m.ref) : ''}</div></div>${m.factureId ? `<button class="btn btn-sm" data-act="factopen" data-id="${esc(m.factureId)}">Facture</button>` : ''}</div>`).join('')}</div>` : '<div class="empty"><strong>Aucun mouvement.</strong></div>'}</div>`;
 };
@@ -1988,7 +1993,7 @@ async function saveStockMove(pid) { const f = $('#st-form'); if (!f.reportValidi
 /* ===================== ventes & marges (vision 360°) =====================
    Une vente = quantité vendue × prix de vente TTC ; le coût vient du prix d'achat HT de la dernière facture (fiche stock).
    Aujourd'hui : relevé « il reste combien ? » (vendu = stock − reste). Plus tard : tickets Z de la caisse BM5 (source « caisse »). */
-const VentesOpts = { per: '7' };
+const VentesOpts = { per: '7', cat: 'tous' };
 const r2 = n => Math.round(n * 100) / 100, r3 = n => Math.round(n * 1000) / 1000;
 function calcVente(p, st, qte, prixTTC) {
   const tva = tvaVente(p, st); const achat = st ? num(st.achatHT) : null;
@@ -2101,13 +2106,16 @@ Views.ventes = function () {
   const t = todayStr(); const per = VentesOpts.per;
   const toutes = Store.all('ventes');
   const debut = per === 'jour' ? t : per === '7' ? addDays(t, -6) : per === '30' ? addDays(t, -29) : (toutes.map(v => v.date).sort()[0] || t);
-  const V = toutes.filter(v => (v.date || '') >= debut && (v.date || '') <= t);
+  const catDe = id => (Store.get('produits', id) || {}).cat || 'autre';
+  const Vp = toutes.filter(v => (v.date || '') >= debut && (v.date || '') <= t);
+  const V = Vp.filter(v => VentesOpts.cat === 'tous' || catDe(v.produitId) === VentesOpts.cat);
   const somme = (L, k) => r2(L.reduce((a, v) => a + (num(v[k]) || 0), 0));
   const caTTC = somme(V, 'caTTC'), caHT = somme(V, 'caHT'), cout = somme(V.filter(v => v.coutHT != null), 'coutHT'), marge = somme(V.filter(v => v.margeHT != null), 'margeHT');
   const caAvecCout = somme(V.filter(v => v.coutHT != null), 'caHT'); const taux = caAvecCout > 0 ? marge / caAvecCout : null;
   const kg = r3(V.filter(v => v.unite === 'kg').reduce((a, v) => a + num(v.qte), 0)), pcs = V.filter(v => v.unite !== 'kg').reduce((a, v) => a + num(v.qte), 0);
-  const achats = r2(Store.all('factures').filter(f => f.type === 'facture' && !f.ecarte && (f.date || '') >= debut && (f.date || '') <= t).reduce((a, f) => a + (num(f.ht) || 0), 0));
-  const stocks = Store.all('stock').filter(x => x.qte != null); const valeur = r2(stocks.reduce((a, x) => a + (num(x.qte) > 0 && num(x.achatHT) != null ? num(x.qte) * num(x.achatHT) : 0), 0));
+  const achats = r2(Store.all('mouvements').filter(m => m.type === 'entree' && m.achatHT != null && (m.date || '') >= debut && (m.date || '') <= t && (VentesOpts.cat === 'tous' || catDe(m.produitId) === VentesOpts.cat)).reduce((a, m) => a + num(m.qte) * num(m.achatHT), 0));
+  const stocks = Store.all('stock').filter(x => x.qte != null && (VentesOpts.cat === 'tous' || catDe(x.id) === VentesOpts.cat));
+  const parCat = CATS_STOCK.map(([c, l]) => { const L = Vp.filter(v => catDe(v.produitId) === c); const ca = somme(L, 'caTTC'), ht = somme(L, 'caHT'), co = somme(L.filter(v => v.coutHT != null), 'coutHT'), ma = somme(L.filter(v => v.margeHT != null), 'margeHT'); const st = stockParCategorie().find(x => x.c === c); return { c, l, ca, ht, co, ma, taux: ht > 0 ? ma / ht : null, stock: st ? st.v : 0 }; }); const valeur = r2(stocks.reduce((a, x) => a + (num(x.qte) > 0 && num(x.achatHT) != null ? num(x.qte) * num(x.achatHT) : 0), 0));
   const jours = []; const nbJ = Math.min(62, Math.round((new Date(t) - new Date(debut)) / 86400000) + 1);
   for (let k = 0; k < nbJ; k++) { const d = addDays(debut, k); const L = V.filter(v => v.date === d); jours.push({ d, caHT: somme(L, 'caHT'), coutHT: somme(L.filter(v => v.coutHT != null), 'coutHT'), margeHT: somme(L.filter(v => v.margeHT != null), 'margeHT') }); }
   const parP = {}; V.forEach(v => { const x = parP[v.produitId] || (parP[v.produitId] = { id: v.produitId, nom: v.produitNom, unite: v.unite, qte: 0, caTTC: 0, caHT: 0, coutHT: 0, margeHT: 0 }); x.qte = r3(x.qte + num(v.qte)); x.caTTC = r2(x.caTTC + num(v.caTTC)); x.caHT = r2(x.caHT + num(v.caHT)); x.coutHT = r2(x.coutHT + (num(v.coutHT) || 0)); x.margeHT = r2(x.margeHT + (num(v.margeHT) || 0)); });
@@ -2119,16 +2127,17 @@ Views.ventes = function () {
   const derniers = toutes.slice().sort((a, b) => String(b.cree || '').localeCompare(String(a.cree || ''))).slice(0, 12);
   return `
   <div class="page-head"><div><div class="eyebrow">Achats · stock · ventes · marges</div><h1>Ventes & marges</h1><p class="lead">Vision complète : ce qui est acheté (factures), ce qui reste (stock), ce qui est vendu et ce que ça rapporte.</p></div>
-    <div class="toolbar">${window.FORCE_GESTION ? `<a class="btn btn-xl" href="#gestion">← Prix</a>` : ''}<div class="seg">${PER.map(([k, l]) => `<button class="${per === k ? 'on' : ''}" data-act="ventesper" data-v="${k}">${l}</button>`).join('')}</div></div></div>
+    <div class="toolbar">${window.FORCE_GESTION ? `<a class="btn btn-xl" href="#gestion">← Prix</a>` : ''}<div class="seg">${PER.map(([k, l]) => `<button class="${per === k ? 'on' : ''}" data-act="ventesper" data-v="${k}">${l}</button>`).join('')}</div><div class="seg">${[['tous', 'Tout'], ...CATS_STOCK].map(([c, l]) => `<button class="${VentesOpts.cat === c ? 'on' : ''}" data-act="ventescat" data-v="${c}">${l}</button>`).join('')}</div></div></div>
   <div class="stats kpi">
     <div class="stat hero"><span class="v num">${esc(fmtMoney(marge))}</span><span class="k">marge brute HT${taux != null ? ' · ' + pct(taux) + ' du CA' : ''}</span></div>
     <div class="stat"><span class="v num">${esc(fmtMoney(caTTC))}</span><span class="k">chiffre d'affaires TTC</span></div>
     <div class="stat"><span class="v num">${esc(fmtMoney(caHT))}</span><span class="k">chiffre d'affaires HT</span></div>
     <div class="stat"><span class="v num">${esc(fmtMoney(cout))}</span><span class="k">coût d'achat des ventes HT</span></div>
     <div class="stat"><span class="v num">${esc(kg ? fmtQty(kg) + ' kg' : pcs ? fmtQty(pcs) + ' p.' : '0')}</span><span class="k">vendus${kg && pcs ? ' + ' + fmtQty(pcs) + ' pièces' : ''}</span></div>
-    <div class="stat"><span class="v num">${esc(fmtMoney(achats))}</span><span class="k">achats HT (factures)</span></div>
+    <div class="stat"><span class="v num">${esc(fmtMoney(achats))}</span><span class="k">achats mis en stock HT (factures)</span></div>
     <div class="stat"><span class="v num">${esc(fmtMoney(valeur))}</span><span class="k">valeur du stock HT</span></div>
   </div>
+  <div class="card" style="margin-bottom:16px"><div class="card-head"><h2>Par catégorie</h2></div><div class="table-wrap"><table class="table"><thead><tr><th>Catégorie</th><th class="right">CA TTC</th><th class="right">CA HT</th><th class="right">Coût HT</th><th class="right">Marge HT</th><th class="right">Marge %</th><th class="right">Stock (achat HT)</th></tr></thead><tbody>${parCat.map(x => `<tr class="${VentesOpts.cat === x.c ? 'on' : ''}" data-act="ventescat" data-v="${x.c}" style="cursor:pointer"><td><strong>${esc(x.l)}</strong></td><td class="right num">${esc(fmtMoney(x.ca))}</td><td class="right num">${esc(fmtMoney(x.ht))}</td><td class="right num">${esc(fmtMoney(x.co))}</td><td class="right num" style="font-weight:800">${esc(fmtMoney(x.ma))}</td><td class="right num">${esc(pct(x.taux))}</td><td class="right num">${esc(fmtMoney(x.stock))}</td></tr>`).join('')}</tbody></table></div></div>
   ${V.length ? `<div class="viz-card viz"><h2>Chiffre d'affaires HT par jour</h2><div class="sub">Chaque barre = coût d'achat + marge. Touchez une barre pour le détail.</div><div class="viz-legend"><span><i style="background:${VIZ.marge}"></i>Marge HT</span><span><i style="background:${VIZ.cout}"></i>Coût d'achat HT</span></div>${grapheJours(jours)}</div>
   <div class="viz-card viz"><h2>Marge HT par produit</h2><div class="sub">Les produits qui rapportent le plus, sur la période.</div>${grapheProduits(prods)}</div>
   <div class="card" style="margin-bottom:16px"><div class="card-head"><h2>Détail par produit</h2></div><div class="table-wrap"><table class="table"><thead><tr><th>Produit</th><th class="right">Vendu</th><th class="right">CA TTC</th><th class="right">CA HT</th><th class="right">Coût HT</th><th class="right">Marge HT</th><th class="right">Marge %</th><th class="right">Coef.</th><th class="right">Reste en stock</th></tr></thead><tbody>${prods.map(x => { const st = Store.get('stock', x.id) || {}; return `<tr><td><strong>${esc(x.nom)}</strong></td><td class="right num">${esc(fmtQty(x.qte) + ' ' + u(x.unite))}</td><td class="right num">${esc(fmtMoney(x.caTTC))}</td><td class="right num">${esc(fmtMoney(x.caHT))}</td><td class="right num">${esc(fmtMoney(x.coutHT))}</td><td class="right num" style="font-weight:800">${esc(fmtMoney(x.margeHT))}</td><td class="right num">${esc(pct(x.caHT > 0 ? x.margeHT / x.caHT : null))}</td><td class="right num">${x.coutHT > 0 ? '×' + esc((x.caTTC / x.coutHT).toFixed(2).replace('.', ',')) : '—'}</td><td class="right num">${st.qte != null ? esc(fmtQty(st.qte) + ' ' + u(st.unite)) : '—'}</td></tr>`; }).join('')}</tbody></table></div></div>` : `<div class="empty" style="margin-bottom:16px"><strong>Aucune vente sur la période.</strong><span>Touchez « Il reste… » sur un produit ci-dessous : je calcule ce qui a été vendu et la marge.</span></div>`}
@@ -2313,6 +2322,8 @@ const Actions = {
   stshow: el => { StockOpts.show = el.dataset.v; render(); },
   stmove: el => openStockMove(el.dataset.id, el.dataset.type),
   streleve: el => ouvrirReleve(el.dataset.id),
+  stcat: el => { StockOpts.cat = el.dataset.v; render(); },
+  ventescat: el => { VentesOpts.cat = el.dataset.v; render(); },
   savereleve: el => saveReleve(el.dataset.id),
   ventesper: el => { VentesOpts.per = el.dataset.v; render(); },
   vendel: el => supprimerVente(el.dataset.id),
@@ -3474,7 +3485,7 @@ setInterval(() => FactLecture.planifier(), 20000);
 /* ---------- mise à jour automatique ----------
    Quand une nouvelle version est publiée, chaque appareil (iPad du comptoir, téléphone) se recharge tout seul
    au premier moment calme : pas de fenêtre ouverte, pas de saisie en cours, pas d'alerte qui sonne, pas d'enregistrement. */
-const APP_VERSION = '73e1ab9270';
+const APP_VERSION = 'd2cc683b72';
 const MiseAJour = {
   attente: null, _t: 0,
   async verifier() {
@@ -3565,10 +3576,11 @@ function cleLigne(f, l) { return ((slugRef(f && f.fournisseur) || 'fournisseur')
 function liaisonDe(f, l) { return Store.get('liaisons', cleLigne(f, l)); }
 function aRelier(f) { return (!f || f.ecarte || f.lu === 'ignore' || !Array.isArray(f.lignes)) ? 0 : f.lignes.filter(l => !liaisonDe(f, l)).length; }
 /* quantité qui entrera en stock pour cette ligne, dans l'unité du produit (kg ou pièce) ; null = à préciser */
-function qteStockLigne(l, p) {
+function qteStockLigne(l, p, li) {
   if (!l || !p) return null;
-  if (p.unit === 'kg') return l.unite === 'kg' ? num(l.qte) : num(l.poids);
-  return l.unite === 'kg' ? num(l.pieces) : num(l.qte);
+  let q = p.unit === 'kg' ? (l.unite === 'kg' ? num(l.qte) : num(l.poids)) : (l.unite === 'kg' ? num(l.pieces) : num(l.qte));
+  const k = li ? num(li.facteur) : null; if (q != null && k && k > 0) q = Math.round(q * k * 1000) / 1000;   // ex. pack de 24 canettes, carton de 8 lots
+  return q;
 }
 const uniteCourte = u => u === 'kg' ? 'kg' : 'p.';
 function lienLigne(f, l, i) {
@@ -3576,7 +3588,7 @@ function lienLigne(f, l, i) {
   if (li && li.frais) return `<button class="lier-btn ign" ${a}>+ frais sur le prix d'achat</button>`;
   if (li && li.ignore) return `<button class="lier-btn ign" ${a}>— pas en stock</button>`;
   if (li && li.produitId) {
-    const p = Store.get('produits', li.produitId); const q = qteStockLigne(l, p);
+    const p = Store.get('produits', li.produitId); const q = qteStockLigne(l, p, li);
     return `<button class="lier-btn ok" ${a}>✓ ${esc(p ? p.name : (li.produitNom || 'produit'))}${p && q != null ? ` <small>${esc(fmtQty(q))} ${uniteCourte(p.unit)}</small>` : ''}</button>`;
   }
   return `<button class="lier-btn todo" ${a}>Relier ›</button>`;
@@ -3637,7 +3649,7 @@ function lignesStock(f) {
   f.lignes.forEach((l, i) => {
     const li = liaisonDe(f, l); if (li && li.frais) { frais += num(l.montant) || 0; return; }
     if (!li || li.ignore || !li.produitId) return;
-    const p = Store.get('produits', li.produitId); const q = qteStockLigne(l, p);
+    const p = Store.get('produits', li.produitId); const q = qteStockLigne(l, p, li);
     out.push({ i, l, p, qte: q, unite: p && p.unit === 'kg' ? 'kg' : 'piece', montant: num(l.montant) });
   });
   const base = out.reduce((a, x) => a + (x.montant || 0), 0);
