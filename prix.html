@@ -597,6 +597,19 @@ textarea.input{min-height:90px}
 .lier-prod small{font-weight:500;font-size:.8rem;opacity:.7}
 .lier-prod.sugg{border:2px solid var(--fg)}
 .lier-prod.on{background:var(--ok-soft);border-color:var(--ok);color:var(--ok)}
+.stats.kpi{grid-template-columns:repeat(4,1fr)}.stats.kpi .v{white-space:nowrap;font-size:1.7rem}.stat.hero .v{font-size:3rem!important}.stat.hero{background:var(--surface-2)}
+.viz-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;margin-bottom:16px}
+.viz-card h2{margin:0 0 2px;font-size:1.05rem}.viz-card .sub{color:var(--fg-3);font-size:.86rem;margin-bottom:8px}
+.viz svg{display:block;width:100%;height:auto;overflow:visible}
+.viz text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-variant-numeric:tabular-nums}
+.viz [data-tip]{cursor:pointer}.viz [data-tip]:hover .m,.viz [data-tip]:focus .m{opacity:.82}
+.viz-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:.86rem;color:var(--fg-2);margin:4px 0 6px}
+.viz-legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+#viz-tip{position:fixed;z-index:9999;pointer-events:none;background:#0b0b0b;color:#fff;border-radius:10px;padding:8px 10px;font-size:.86rem;line-height:1.35;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:260px;display:none}
+#viz-tip b{font-size:1rem}#viz-tip .l{opacity:.75}
+.releve-prev{padding:12px 14px;border-radius:12px;background:var(--surface-2);font-size:1rem;line-height:1.5}
+.gest-actions .wide{grid-column:1/-1}
+@media(max-width:900px){.stats.kpi{grid-template-columns:repeat(2,1fr)}.stat.hero{grid-column:1/-1}}@media(max-width:600px){.stat.hero .v{font-size:2.4rem!important}.stats.kpi .v{font-size:1.35rem}}
 </style>
 
 </head>
@@ -700,7 +713,7 @@ const LS = {
 };
 
 /* ===================== store (db capability, or local file) ===================== */
-const COLLS = ['produits', 'reglages', 'receptions', 'fabrications', 'journal', 'commandes', 'dlc', 'factures', 'stock', 'mouvements', 'recettes', 'notifications', 'equipements', 'temperatures', 'vocaux', 'liaisons'];
+const COLLS = ['produits', 'reglages', 'receptions', 'fabrications', 'journal', 'commandes', 'dlc', 'factures', 'stock', 'mouvements', 'recettes', 'notifications', 'equipements', 'temperatures', 'vocaux', 'liaisons', 'ventes'];
 const Store = {
   mode: 'local', db: null, cache: {}, ready: false, _subs: new Set(), _raf: 0, _unsubs: [], errors: 0,
   fb: null,
@@ -881,13 +894,14 @@ const ROUTES = [
   { id: 'commandes', label: 'Commandes', icon: 'bag' },
   { id: 'factures', label: 'Factures & BL', icon: 'receipt' },
   { id: 'stocks', label: 'Stocks', icon: 'boxes' },
+  { id: 'ventes', label: 'Ventes & marges', icon: 'chart' },
   { id: 'recettes', label: 'Recettes', icon: 'book' },
   { id: 'reglages', label: 'Réglages', icon: 'gear' }
 ];
 const Views = {};
 const UI = { route: 'accueil', q: {}, ready: false };
 
-function currentRoute() { if (window.FORCE_GESTION) return 'gestion'; const h = (location.hash || '#accueil').replace('#', ''); if (h === 'gestion' || h === 'produits') return 'gestion'; return ROUTES.some(r => r.id === h) ? h : 'accueil'; }
+function currentRoute() { if (window.FORCE_GESTION) return location.hash === '#ventes' ? 'ventes' : 'gestion'; const h = (location.hash || '#accueil').replace('#', ''); if (h === 'gestion' || h === 'produits') return 'gestion'; return ROUTES.some(r => r.id === h) ? h : 'accueil'; }
 function unreadNotifs() { return Store.all('notifications').filter(n => !n.lu).sort((a, b) => (b.t || '').localeCompare(a.t || '')); }
 async function notify(entry) {
   const all = Store.all('notifications').sort((a, b) => (a.t || '').localeCompare(b.t || ''));
@@ -934,7 +948,7 @@ function render() {
     const active = document.activeElement; const fid = active && active.id && $('#view').contains(active) ? active.id : null;
     const selStart = fid && 'selectionStart' in active ? active.selectionStart : null;
     const scrollY = window.scrollY;
-    document.body.classList.toggle('gestion-mode', r === 'gestion'); document.body.classList.toggle('is-home', r === 'accueil'); const hb = $('#home-btn'); if (hb) { const cur = ROUTES.find(x => x.id === r); hb.innerHTML = `${I.back} Accueil`; hb.title = cur ? cur.label : ''; }
+    document.body.classList.toggle('gestion-mode', r === 'gestion' || (!!window.FORCE_GESTION && r === 'ventes')); document.body.classList.toggle('is-home', r === 'accueil'); const hb = $('#home-btn'); if (hb) { const cur = ROUTES.find(x => x.id === r); hb.innerHTML = `${I.back} Accueil`; hb.title = cur ? cur.label : ''; }
     renderNav(); renderBell();
     const v = Views[r] || Views.accueil;
     let html; try { html = v(); } catch (e) { console.error(e); html = `<div class="notice crit">Erreur d'affichage : ${esc(e.message)}</div>`; }
@@ -1037,6 +1051,10 @@ Views.accueil = function () {
   const cmds = Store.all('commandes').filter(c => c.date === t && c.statut !== 'retiree' && c.statut !== 'annulee').sort((a, b2) => (a.heure || '').localeCompare(b2.heure || ''));
   const dlcs = dlcItems().filter(x => !x.traite && x.jours <= 1);
   const factDue = b.factures || 0; const stockLow = b.stocks || 0;
+  const factAPayer = Store.all('factures').filter(f => f.type === 'facture' && !f.ecarte && f.statut !== 'payee'); const factMontant = factAPayer.reduce((a, f) => a + (num(f.ttc) || 0), 0);
+  const factRelier = Store.all('factures').reduce((a, f) => a + aRelier(f), 0);
+  const enStock = Store.all('stock').filter(x => num(x.qte) > 0); const valStock = enStock.reduce((a, x) => a + (num(x.achatHT) != null ? num(x.qte) * num(x.achatHT) : 0), 0);
+  const v7 = Store.all('ventes').filter(v => (v.date || '') >= addDays(t, -6)); const marge7 = v7.reduce((a, v) => a + (num(v.margeHT) || 0), 0); const ca7 = v7.reduce((a, v) => a + (num(v.caTTC) || 0), 0);
   const lots = Store.all('fabrications').filter(f => f.date === t).length;
   const since7 = new Date(Date.now() - 7 * 86400000).toISOString();
   const tempDone = ['matin', 'soir'].filter(m => Store.get('temperatures', `r-${t}-${m}`)).length;
@@ -1050,7 +1068,8 @@ Views.accueil = function () {
     { id: 'dlc', t: 'Calendrier DLC / DDM', d: 'Les dates de tous les lots sur un calendrier, du plus urgent au plus lointain.', tag: 'Mois · liste', alert: dlcs.length ? `${dlcs.length} à traiter` : '' },
     { id: 'commandes', t: 'Commandes clients', d: 'Date, heure, nom, texte libre et rappel.', tag: 'Préparation · retrait', alert: cmds.length ? `${cmds.length} aujourd'hui` : '' },
     { id: 'factures', t: 'Factures & BL', d: 'Photo du document, fournisseur, échéance et statut.', tag: 'Photo · échéances', alert: factDue ? `${factDue} échue${factDue > 1 ? 's' : ''}` : '' },
-    { id: 'stocks', t: 'Stocks et pertes', d: 'Entrées, sorties, pertes, inventaire et seuils.', tag: 'Stock théorique', alert: stockLow ? `${stockLow} sous le seuil` : '' },
+    { id: 'stocks', t: 'Stocks et pertes', d: 'Entrées automatiques par les factures, prix d\'achat, marge, sorties, pertes, inventaire et seuils.', tag: `${enStock.length} en stock`, alert: stockLow ? `${stockLow} sous le seuil` : '' },
+    { id: 'ventes', t: 'Ventes & marges', d: 'Achats, stock, ventes et marges en un coup d\'œil, avec graphiques.', tag: 'Vision 360°' },
     { id: 'recettes', t: 'Recettes', d: 'Fiches codées 001, 002… reprises sur les étiquettes de traçabilité.', tag: `${Store.count('recettes')} fiche${Store.count('recettes') > 1 ? 's' : ''}` },
     { id: 'gestion', t: 'Prix BHVA Gestion', d: 'Application à part pour le téléphone du responsable : produits, prix, offres, origines. Synchronisée avec le comptoir.', tag: 'Application séparée · à installer sur le téléphone' }
   ];
@@ -1059,12 +1078,13 @@ Views.accueil = function () {
     { id: 'trace', t: 'Traçabilité', n: lots, k: `lot${lots > 1 ? 's' : ''} fabriqué${lots > 1 ? 's' : ''} aujourd'hui`, alert: false },
     { id: 'commandes', t: 'Commandes', n: cmds.length, k: 'à préparer ou remettre', alert: cmds.length > 0 },
     { id: 'dlc', t: 'Dates DLC / DDM', n: dlcs.length, k: 'à traiter', alert: dlcs.length > 0 },
-    { id: 'temperatures', t: 'Températures', n: tempDone, k: tempDone === 2 ? 'matin et soir relevés' : tempDone === 1 ? 'relevé sur 2 fait' : 'relevé sur 2 fait aujourd\'hui', alert: tempDone < (Number(nowTime().slice(0, 2)) >= 14 ? 2 : 1) }
+    { id: 'temperatures', t: 'Températures', n: tempDone, k: tempDone === 2 ? 'matin et soir relevés' : tempDone === 1 ? 'relevé sur 2 fait' : 'relevé sur 2 fait aujourd\'hui', alert: tempDone < (Number(nowTime().slice(0, 2)) >= 14 ? 2 : 1) },
+    { id: 'ventes', t: 'Ventes & marges', n: fmtMoney(marge7).replace(',00', ''), k: v7.length ? `marge HT sur 7 jours · CA ${fmtMoney(ca7)}` : 'marge sur 7 jours · touchez pour noter les ventes', alert: false }
   ];
   const small = [
     { id: 'evolution', t: 'Évolution des prix', n: priceChanges.length, k: 'sur 7 jours', alert: false },
-    { id: 'stocks', t: 'Stocks', n: stockLow, k: stockLow ? 'sous le seuil' : '', alert: stockLow > 0 },
-    { id: 'factures', t: 'Factures & BL', n: factDue, k: factDue ? 'échues' : '', alert: factDue > 0 },
+    { id: 'stocks', t: 'Stocks', n: enStock.length, k: stockLow ? `${stockLow} sous le seuil` : `produit${enStock.length > 1 ? 's' : ''} en stock${valStock ? ' · ' + fmtMoney(valStock) + ' HT' : ''}`, alert: stockLow > 0 },
+    { id: 'factures', t: 'Factures & BL', n: factAPayer.length, k: factDue ? `${factDue} échue${factDue > 1 ? 's' : ''}` : factRelier ? `${factRelier} référence${factRelier > 1 ? 's' : ''} à relier` : `à payer${factMontant ? ' · ' + fmtMoney(factMontant) : ''}`, alert: factDue > 0 || factRelier > 0 },
     { id: 'recettes', t: 'Recettes', n: Store.count('recettes'), k: 'fiches', alert: false },
     { id: 'gestion', t: 'Prix BHVA', n: '', k: 'application téléphone', alert: false },
     { id: 'reglages', t: 'Réglages', n: '', k: '', alert: false }
@@ -1471,7 +1491,7 @@ Views.gestion = function () {
   const un = unreadNotifs().length;
   return `
   <div class="gest-top"><div><div class="eyebrow">Synchronisé avec le comptoir</div><h1>Prix BHVA</h1></div></div>
-  <div class="gest-actions"><button class="btn btn-dark" data-act="voicenew" aria-label="Message vocal">${I.mic} Vocal</button><button class="btn btn-dark" data-act="msgnew" aria-label="Message au comptoir">${I.bell} Message</button><button class="btn btn-primary" data-act="newp">${I.plus} Produit</button></div>
+  <div class="gest-actions"><button class="btn btn-dark" data-act="voicenew" aria-label="Message vocal">${I.mic} Vocal</button><button class="btn btn-dark" data-act="msgnew" aria-label="Message au comptoir">${I.bell} Message</button><button class="btn btn-primary" data-act="newp">${I.plus} Produit</button><a class="btn wide" href="#ventes">${I.chart} Ventes, stock et marges</a></div>
   <div class="gest-head">
     <div class="search">${I.search}<input class="input input-lg" id="prod-search" placeholder="Rechercher un produit…" value="${esc(ProdOpts.q)}" data-on="psearch" autocomplete="off"></div>
     <div class="chips">${cats.map(c => `<button class="chip ${cat === c ? 'on' : ''}" data-act="pcat" data-v="${c}">${CAT_LABEL[c]}</button>`).join('')}<button class="chip ${cat === 'tous' ? 'on' : ''}" data-act="pcat" data-v="tous">Tous</button></div>
@@ -1930,7 +1950,7 @@ Views.stocks = function () {
   const nq = normStr(StockOpts.q);
   const rows = prods.map(p => ({ p, s: Store.get('stock', p.id) || { qte: null, min: null, unite: p.unit === 'kg' ? 'kg' : 'piece' } })).filter(r => (!nq || normStr(r.p.name).includes(nq)) && (StockOpts.show === 'tous' || (StockOpts.show === 'bas' ? (r.s.min != null && r.s.qte != null && r.s.qte <= r.s.min) : (r.s.qte != null))));
   const moves = Store.all('mouvements').sort((a, b) => (b.cree || '').localeCompare(a.cree || '')).slice(0, 40);
-  const MV = { entree: ['Entrée', 'pill-ok'], sortie: ['Sortie', 'pill-info'], perte: ['Perte', 'pill-crit'], inventaire: ['Inventaire', 'pill-neutral'] };
+  const MV = { entree: ['Entrée', 'pill-ok'], sortie: ['Sortie', 'pill-info'], perte: ['Perte', 'pill-crit'], inventaire: ['Inventaire', 'pill-neutral'], vente: ['Vente', 'pill-info'] };
   const suivis = Store.all('stock').filter(x => x.qte != null);
   const valeur = suivis.reduce((t, x) => t + (num(x.qte) > 0 && num(x.achatHT) != null ? num(x.qte) * num(x.achatHT) : 0), 0);
   const u = x => UNIT_NAME[x] || x || '';
@@ -1944,7 +1964,7 @@ Views.stocks = function () {
       <td class="right num">${m ? `<b style="color:${m.marge >= 0 ? 'var(--ok)' : 'var(--crit)'}">${esc(fmtMoney(m.marge))}</b><span class="muted">${un}</span><div class="small muted">${m.taux != null ? esc(Math.round(m.taux * 100) + ' %') : ''} · ×${esc(m.coef.toFixed(2).replace('.', ','))}</div>` : '<span class="muted">—</span>'}</td>
       <td class="right num">${s.qte != null && s.achatHT != null && s.qte > 0 ? esc(fmtMoney(num(s.qte) * num(s.achatHT))) : '<span class="muted">—</span>'}</td>
       <td class="right"><input class="input num" type="number" step="0.5" min="0" style="width:72px;text-align:right;min-height:32px;padding:3px 6px" value="${s.min ?? ''}" data-on="stmin" data-id="${p.id}" id="min-${p.id}" aria-label="Seuil"></td>
-      <td class="right" style="white-space:nowrap"><button class="btn btn-sm" data-act="stmove" data-id="${p.id}" data-type="entree">+</button> <button class="btn btn-sm" data-act="stmove" data-id="${p.id}" data-type="sortie">−</button> <button class="btn btn-sm" data-act="stmove" data-id="${p.id}" data-type="inventaire">Inv.</button></td></tr>`;
+      <td class="right" style="white-space:nowrap">${s.qte != null ? `<button class="btn btn-sm btn-primary" data-act="streleve" data-id="${p.id}">Il reste…</button> ` : ''}<button class="btn btn-sm" data-act="stmove" data-id="${p.id}" data-type="entree">+</button> <button class="btn btn-sm" data-act="stmove" data-id="${p.id}" data-type="sortie">−</button> <button class="btn btn-sm" data-act="stmove" data-id="${p.id}" data-type="inventaire">Inv.</button></td></tr>`;
   };
   return `
   <div class="page-head"><div><div class="eyebrow">Réserve & chambre froide</div><h1>Gestion des stocks</h1><p class="lead">Les factures reliées à vos produits entrent toutes seules, avec le prix d'achat ; sorties, pertes, inventaire, seuils.</p></div>
@@ -1961,6 +1981,158 @@ function openStockMove(pid, type) {
   $('#st-form').addEventListener('submit', e => { e.preventDefault(); saveStockMove(pid); });
 }
 async function saveStockMove(pid) { const f = $('#st-form'); if (!f.reportValidity()) return; const o = formData(f); const p = Store.get('produits', pid); const s = Store.get('stock', pid) || {}; try { await stockMove(pid, o.type, num(o.qte) || 0, s.unite || (p.unit === 'kg' ? 'kg' : 'piece'), o.ref.trim()); closeModal(); toast('Stock mis à jour', 'ok'); } catch (e) { } }
+
+/* ===================== ventes & marges (vision 360°) =====================
+   Une vente = quantité vendue × prix de vente TTC ; le coût vient du prix d'achat HT de la dernière facture (fiche stock).
+   Aujourd'hui : relevé « il reste combien ? » (vendu = stock − reste). Plus tard : tickets Z de la caisse BM5 (source « caisse »). */
+const VentesOpts = { per: '7' };
+const r2 = n => Math.round(n * 100) / 100, r3 = n => Math.round(n * 1000) / 1000;
+function calcVente(p, st, qte, prixTTC) {
+  const tva = st && st.achatTva != null ? num(st.achatTva) : 5.5; const achat = st ? num(st.achatHT) : null;
+  const caTTC = r2(qte * prixTTC), caHT = r2(caTTC / (1 + (tva || 0) / 100)), coutHT = achat != null ? r2(qte * achat) : null;
+  return { tva, achatHT: achat, caTTC, caHT, coutHT, margeHT: coutHT != null ? r2(caHT - coutHT) : null };
+}
+function ouvrirReleve(pid) {
+  const p = Store.get('produits', pid); if (!p) return; const st = Store.get('stock', pid) || { qte: 0, unite: p.unit === 'kg' ? 'kg' : 'piece' };
+  const un = UNIT_NAME[st.unite] || st.unite;
+  const body = `<form id="rel-form" class="stack" data-id="${esc(pid)}">
+    <div class="lier-head"><div class="eyebrow">Relevé de stock</div><div style="font-weight:800;font-size:1.15rem">${esc(p.name)}</div><div class="muted">Stock théorique : <b>${esc(fmtQty(num(st.qte) || 0))} ${esc(un)}</b>${st.achatHT != null ? ` · acheté ${esc(fmtMoney(num(st.achatHT)))}/${esc(un)} HT` : ''}</div></div>
+    <div class="form-grid">
+      ${fld(`Il reste combien ? (${un})`, `<input class="input" name="reste" inputmode="decimal" autocomplete="off" required data-on="relcalc" style="font-size:1.4rem;font-weight:800;min-height:56px" placeholder="ex. 71,872">`)}
+      ${fld(`Prix de vente TTC (€/${un})`, `<input class="input" name="prix" inputmode="decimal" autocomplete="off" required data-on="relcalc" value="${p.price != null ? esc(String(p.price).replace('.', ',')) : ''}" style="font-size:1.4rem;font-weight:800;min-height:56px"><small class="muted">Prix de l'affichage ; changez-le s'il y avait une promo</small>`)}
+    </div>
+    <div id="rel-prev" class="releve-prev muted">Tapez ce qu'il reste : je calcule ce qui a été vendu, le chiffre d'affaires et la marge.</div>
+  </form>`;
+  openModal({ title: 'Ventes : il reste combien ?', body, footer: `<button class="btn" data-close="1">Annuler</button><button class="btn btn-primary" data-act="savereleve" data-id="${esc(pid)}">${I.check} Enregistrer</button>` });
+  $('#rel-form').addEventListener('submit', e => { e.preventDefault(); saveReleve(pid); });
+}
+function apercuReleve() {
+  const f = $('#rel-form'); const box = $('#rel-prev'); if (!f || !box) return;
+  const pid = f.dataset.id; const p = Store.get('produits', pid); const st = Store.get('stock', pid) || {}; const un = UNIT_NAME[st.unite] || st.unite || '';
+  const reste = num(f.reste.value), prix = num(f.prix.value);
+  if (reste == null) { box.innerHTML = 'Tapez ce qu\'il reste : je calcule ce qui a été vendu, le chiffre d\'affaires et la marge.'; return; }
+  const vendu = r3((num(st.qte) || 0) - reste);
+  if (vendu < 0) { box.innerHTML = `Il y a <b>${esc(fmtQty(-vendu))} ${esc(un)} de plus</b> que le stock théorique : le stock sera corrigé (inventaire), sans vente.`; return; }
+  if (vendu === 0) { box.innerHTML = 'Rien de vendu depuis le dernier relevé.'; return; }
+  if (prix == null) { box.innerHTML = `Vendu : <b>${esc(fmtQty(vendu))} ${esc(un)}</b>. Indiquez le prix de vente.`; return; }
+  const c = calcVente(p, st, vendu, prix);
+  box.innerHTML = `Vendu : <b>${esc(fmtQty(vendu))} ${esc(un)}</b> · CA <b>${esc(fmtMoney(c.caTTC))}</b> TTC (${esc(fmtMoney(c.caHT))} HT)${c.coutHT != null ? `<br>Coût d'achat ${esc(fmtMoney(c.coutHT))} HT · <b style="color:${c.margeHT >= 0 ? 'var(--ok)' : 'var(--crit)'}">marge ${esc(fmtMoney(c.margeHT))} HT</b>${c.caHT > 0 ? ` (${esc(String(Math.round(c.margeHT / c.caHT * 1000) / 10).replace('.', ','))} %)` : ''}` : '<br><span class="muted">Prix d\'achat inconnu : la marge sera calculée quand une facture sera reliée.</span>'}`;
+}
+async function saveReleve(pid) {
+  const f = $('#rel-form'); if (!f || !f.reportValidity()) return;
+  const p = Store.get('produits', pid); const st = Store.get('stock', pid) || { qte: 0, unite: p && p.unit === 'kg' ? 'kg' : 'piece', min: null };
+  const reste = num(f.reste.value), prix = num(f.prix.value); if (reste == null || reste < 0) { toast('Quantité restante non valide', 'err'); return; }
+  const vendu = r3((num(st.qte) || 0) - reste); const maintenant = new Date().toISOString(); const un = st.unite || (p.unit === 'kg' ? 'kg' : 'piece');
+  if (vendu <= 0) {
+    await Store.set('stock', pid, Object.assign({}, st, { qte: r3(reste), unite: un, nom: p.name, maj: maintenant }));
+    await Store.set('mouvements', 'm-' + uid(), { date: todayStr(), t: nowTime(), produitId: pid, produitNom: p.name, type: 'inventaire', qte: r3(reste), unite: un, ref: 'Relevé', cree: maintenant });
+    closeModal(); toast(vendu < 0 ? 'Stock corrigé (inventaire)' : 'Aucune vente : stock inchangé', 'ok'); return;
+  }
+  if (prix == null || prix <= 0) { toast('Indiquez le prix de vente', 'err'); return; }
+  const c = calcVente(p, st, vendu, prix); const id = 'v-' + uid();
+  await Store.set('ventes', id, Object.assign({ date: todayStr(), t: nowTime(), produitId: pid, produitNom: p.name, qte: vendu, unite: un, prixTTC: prix, source: 'releve', reste: r3(reste), cree: maintenant }, c));
+  await Store.set('stock', pid, Object.assign({}, st, { qte: r3(reste), unite: un, nom: p.name, maj: maintenant }));
+  await Store.set('mouvements', 'mv-' + id, { date: todayStr(), t: nowTime(), produitId: pid, produitNom: p.name, type: 'vente', qte: vendu, unite: un, ref: `Vente ${fmtQty(vendu)} ${UNIT_NAME[un] || un} à ${fmtMoney(prix)} TTC`, venteId: id, cree: maintenant });
+  closeModal(); toast(`Vente notée : ${p.name} ${fmtQty(vendu)} ${UNIT_NAME[un] || un}${c.margeHT != null ? ' · marge ' + fmtMoney(c.margeHT) + ' HT' : ''}`, 'ok', 6000);
+}
+async function supprimerVente(id) {
+  const v = Store.get('ventes', id); if (!v) return;
+  if (!(await confirmDialog(`Annuler la vente « ${v.produitNom} ${fmtQty(v.qte)} ${UNIT_NAME[v.unite] || v.unite} » ? Le stock sera remis.`, { ok: 'Annuler la vente', danger: true }))) return;
+  const st = Store.get('stock', v.produitId);
+  if (st) await Store.set('stock', v.produitId, Object.assign({}, st, { qte: r3((num(st.qte) || 0) + num(v.qte)), maj: new Date().toISOString() }));
+  try { await Store.remove('mouvements', 'mv-' + id); } catch (e) { }
+  await Store.remove('ventes', id); toast('Vente annulée, stock remis');
+}
+/* --- graphiques (SVG) : barres fines, extrémité arrondie de 4 px, grille discrète, info-bulle au toucher --- */
+const VIZ = { cout: '#c3c2b7', marge: '#2a78d6', grid: '#e1e0d9', axe: '#c3c2b7', muted: '#898781', ink: '#0b0b0b', ink2: '#52514e' };
+const barre = (x, y, w, h, r) => { r = Math.max(0, Math.min(r, w / 2, h)); return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`; };
+function echelle(max) { if (!(max > 0)) return [1, [0, 1]]; const p = Math.pow(10, Math.floor(Math.log10(max))); const m = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].map(k => k * p).find(v => v >= max) || 10 * p; return [m, [0, m / 4, m / 2, (3 * m) / 4, m]]; }
+const euroAxe = v => v >= 10000 ? Math.round(v / 1000) + ' k€' : (Math.round(v * 100) / 100).toLocaleString('fr-FR') + ' €';
+function tipData(lines) { return esc(JSON.stringify(lines)); }
+function grapheJours(jours) {
+  const W = 720, H = 240, L = 58, R = 10, T = 12, B = 28, w = W - L - R, h = H - T - B;
+  const [max, ticks] = echelle(Math.max(0, ...jours.map(j => Math.max(j.caHT, (j.coutHT || 0) + Math.max(0, j.margeHT || 0)))));
+  const slot = w / Math.max(1, jours.length), bw = Math.max(4, Math.min(24, slot * 0.62)), y = v => T + h - (v / max) * h;
+  const pas = Math.ceil(jours.length / 10);
+  let g = ticks.map(t => `<line x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}" stroke="${t === 0 ? VIZ.axe : VIZ.grid}" stroke-width="1"/><text x="${L - 8}" y="${y(t) + 4}" text-anchor="end" font-size="11" fill="${VIZ.muted}">${esc(euroAxe(t))}</text>`).join('');
+  jours.forEach((j, k) => {
+    const cx = L + slot * k + slot / 2, x = cx - bw / 2; const cout = Math.max(0, j.coutHT || 0), marge = Math.max(0, j.margeHT || 0);
+    const hc = (cout / max) * h, hm = (marge / max) * h; const tip = tipData([fmtDate(j.d), `CA ${fmtMoney(j.caHT)} HT`, `Marge ${fmtMoney(j.margeHT || 0)} HT`, `Coût ${fmtMoney(j.coutHT || 0)} HT`]);
+    let marks = '';
+    if (hc > 0) marks += `<path class="m" d="${hm > 2 ? `M${x},${T + h}V${T + h - hc}H${x + bw}V${T + h}Z` : barre(x, T + h - hc, bw, hc, 4)}" fill="${VIZ.cout}"/>`;
+    if (hm > 2) marks += `<path class="m" d="${barre(x, T + h - hc - hm, bw, Math.max(0, hm - (hc > 0 ? 2 : 0)), 4)}" fill="${VIZ.marge}"/>`;
+    g += `<g data-tip="${tip}" tabindex="0"><rect x="${cx - slot / 2}" y="${T}" width="${slot}" height="${h}" fill="transparent"/>${marks}</g>`;
+    if (k % pas === 0 || k === jours.length - 1) g += `<text x="${cx}" y="${H - 8}" text-anchor="middle" font-size="11" fill="${VIZ.muted}">${esc(j.d.slice(8, 10) + '/' + j.d.slice(5, 7))}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Chiffre d'affaires HT par jour, coût d'achat et marge">${g}</svg>`;
+}
+function grapheProduits(L) {
+  const top = L.slice(0, 10); if (!top.length) return '';
+  const W = 720, row = 34, H = top.length * row + 10, lab = 210, R = 96, w = W - lab - R;
+  const min = Math.min(0, ...top.map(x => x.margeHT)), max = Math.max(0.01, ...top.map(x => x.margeHT)); const sc = v => ((v - min) / (max - min)) * w; const x0 = lab + sc(0);
+  let g = `<line x1="${x0}" x2="${x0}" y1="2" y2="${H - 6}" stroke="${VIZ.axe}" stroke-width="1"/>`;
+  top.forEach((x, k) => {
+    const yy = 6 + k * row, bh = 18, len = Math.abs(sc(x.margeHT) - sc(0)); const neg = x.margeHT < 0;
+    const tip = tipData([x.nom, `Marge ${fmtMoney(x.margeHT)} HT`, `CA ${fmtMoney(x.caTTC)} TTC`, `Vendu ${fmtQty(x.qte)} ${UNIT_NAME[x.unite] || x.unite}`]);
+    const d = len < 1 ? '' : neg ? `M${x0},${yy}H${x0 - len + Math.min(4, len)}Q${x0 - len},${yy} ${x0 - len},${yy + Math.min(4, len)}V${yy + bh - Math.min(4, len)}Q${x0 - len},${yy + bh} ${x0 - len + Math.min(4, len)},${yy + bh}H${x0}Z` : `M${x0},${yy}H${x0 + len - Math.min(4, len)}Q${x0 + len},${yy} ${x0 + len},${yy + Math.min(4, len)}V${yy + bh - Math.min(4, len)}Q${x0 + len},${yy + bh} ${x0 + len - Math.min(4, len)},${yy + bh}H${x0}Z`;
+    g += `<g data-tip="${tip}" tabindex="0"><rect x="0" y="${yy - 7}" width="${W}" height="${row}" fill="transparent"/><text x="${lab - 10}" y="${yy + 13}" text-anchor="end" font-size="13" fill="${VIZ.ink}">${esc(x.nom.length > 28 ? x.nom.slice(0, 27) + '…' : x.nom)}</text>${d ? `<path class="m" d="${d}" fill="${VIZ.marge}"/>` : ''}<text x="${neg ? x0 + 8 : x0 + len + 8}" y="${yy + 13}" font-size="13" font-weight="700" fill="${VIZ.ink}">${esc(fmtMoney(x.margeHT))}</text></g>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Marge HT par produit">${g}</svg>`;
+}
+(function () {   // info-bulle unique des graphiques (souris et toucher)
+  let tip = null; const montrer = (el, ev) => {
+    if (!tip) { tip = document.createElement('div'); tip.id = 'viz-tip'; document.body.appendChild(tip); }
+    let lines = []; try { lines = JSON.parse(el.getAttribute('data-tip') || '[]'); } catch (e) { }
+    tip.textContent = ''; lines.forEach((t, i) => { const d = document.createElement('div'); if (i === 1) { const b = document.createElement('b'); b.textContent = t; d.appendChild(b); } else { d.textContent = t; if (i === 0) d.className = 'l'; } tip.appendChild(d); });
+    const r = el.getBoundingClientRect(); const x = ev && ev.clientX != null ? ev.clientX : r.left + r.width / 2, y = ev && ev.clientY != null ? ev.clientY : r.top;
+    tip.style.display = 'block'; const tw = tip.offsetWidth, th = tip.offsetHeight;
+    tip.style.left = Math.max(8, Math.min(window.innerWidth - tw - 8, x - tw / 2)) + 'px'; tip.style.top = Math.max(8, y - th - 14) + 'px';
+  };
+  const cacher = () => { if (tip) tip.style.display = 'none'; };
+  document.addEventListener('pointermove', e => { const el = e.target.closest && e.target.closest('.viz [data-tip]'); if (el) montrer(el, e); else if (e.pointerType === 'mouse') cacher(); });
+  document.addEventListener('pointerdown', e => { const el = e.target.closest && e.target.closest('.viz [data-tip]'); if (el) montrer(el, e); else cacher(); });
+  document.addEventListener('focusin', e => { const el = e.target.closest && e.target.closest('.viz [data-tip]'); if (el) montrer(el, null); });
+  document.addEventListener('scroll', cacher, true); window.addEventListener('hashchange', cacher);
+})();
+Views.ventes = function () {
+  const t = todayStr(); const per = VentesOpts.per;
+  const toutes = Store.all('ventes');
+  const debut = per === 'jour' ? t : per === '7' ? addDays(t, -6) : per === '30' ? addDays(t, -29) : (toutes.map(v => v.date).sort()[0] || t);
+  const V = toutes.filter(v => (v.date || '') >= debut && (v.date || '') <= t);
+  const somme = (L, k) => r2(L.reduce((a, v) => a + (num(v[k]) || 0), 0));
+  const caTTC = somme(V, 'caTTC'), caHT = somme(V, 'caHT'), cout = somme(V.filter(v => v.coutHT != null), 'coutHT'), marge = somme(V.filter(v => v.margeHT != null), 'margeHT');
+  const caAvecCout = somme(V.filter(v => v.coutHT != null), 'caHT'); const taux = caAvecCout > 0 ? marge / caAvecCout : null;
+  const kg = r3(V.filter(v => v.unite === 'kg').reduce((a, v) => a + num(v.qte), 0)), pcs = V.filter(v => v.unite !== 'kg').reduce((a, v) => a + num(v.qte), 0);
+  const achats = r2(Store.all('factures').filter(f => f.type === 'facture' && !f.ecarte && (f.date || '') >= debut && (f.date || '') <= t).reduce((a, f) => a + (num(f.ht) || 0), 0));
+  const stocks = Store.all('stock').filter(x => x.qte != null); const valeur = r2(stocks.reduce((a, x) => a + (num(x.qte) > 0 && num(x.achatHT) != null ? num(x.qte) * num(x.achatHT) : 0), 0));
+  const jours = []; const nbJ = Math.min(62, Math.round((new Date(t) - new Date(debut)) / 86400000) + 1);
+  for (let k = 0; k < nbJ; k++) { const d = addDays(debut, k); const L = V.filter(v => v.date === d); jours.push({ d, caHT: somme(L, 'caHT'), coutHT: somme(L.filter(v => v.coutHT != null), 'coutHT'), margeHT: somme(L.filter(v => v.margeHT != null), 'margeHT') }); }
+  const parP = {}; V.forEach(v => { const x = parP[v.produitId] || (parP[v.produitId] = { id: v.produitId, nom: v.produitNom, unite: v.unite, qte: 0, caTTC: 0, caHT: 0, coutHT: 0, margeHT: 0 }); x.qte = r3(x.qte + num(v.qte)); x.caTTC = r2(x.caTTC + num(v.caTTC)); x.caHT = r2(x.caHT + num(v.caHT)); x.coutHT = r2(x.coutHT + (num(v.coutHT) || 0)); x.margeHT = r2(x.margeHT + (num(v.margeHT) || 0)); });
+  const prods = Object.values(parP).sort((a, b) => b.margeHT - a.margeHT);
+  const suivis = stocks.map(x => ({ st: x, p: Store.get('produits', x.id) })).filter(x => x.p).sort((a, b) => a.p.name.localeCompare(b.p.name, 'fr'));
+  const PER = [['jour', 'Aujourd\'hui'], ['7', '7 jours'], ['30', '30 jours'], ['tout', 'Tout']];
+  const pct = v => v == null ? '—' : String(Math.round(v * 1000) / 10).replace('.', ',') + ' %';
+  const u = x => UNIT_NAME[x] || x || '';
+  const derniers = toutes.slice().sort((a, b) => String(b.cree || '').localeCompare(String(a.cree || ''))).slice(0, 12);
+  return `
+  <div class="page-head"><div><div class="eyebrow">Achats · stock · ventes · marges</div><h1>Ventes & marges</h1><p class="lead">Vision complète : ce qui est acheté (factures), ce qui reste (stock), ce qui est vendu et ce que ça rapporte.</p></div>
+    <div class="toolbar">${window.FORCE_GESTION ? `<a class="btn btn-xl" href="#gestion">← Prix</a>` : ''}<div class="seg">${PER.map(([k, l]) => `<button class="${per === k ? 'on' : ''}" data-act="ventesper" data-v="${k}">${l}</button>`).join('')}</div></div></div>
+  <div class="stats kpi">
+    <div class="stat hero"><span class="v num">${esc(fmtMoney(marge))}</span><span class="k">marge brute HT${taux != null ? ' · ' + pct(taux) + ' du CA' : ''}</span></div>
+    <div class="stat"><span class="v num">${esc(fmtMoney(caTTC))}</span><span class="k">chiffre d'affaires TTC</span></div>
+    <div class="stat"><span class="v num">${esc(fmtMoney(caHT))}</span><span class="k">chiffre d'affaires HT</span></div>
+    <div class="stat"><span class="v num">${esc(fmtMoney(cout))}</span><span class="k">coût d'achat des ventes HT</span></div>
+    <div class="stat"><span class="v num">${esc(kg ? fmtQty(kg) + ' kg' : pcs ? fmtQty(pcs) + ' p.' : '0')}</span><span class="k">vendus${kg && pcs ? ' + ' + fmtQty(pcs) + ' pièces' : ''}</span></div>
+    <div class="stat"><span class="v num">${esc(fmtMoney(achats))}</span><span class="k">achats HT (factures)</span></div>
+    <div class="stat"><span class="v num">${esc(fmtMoney(valeur))}</span><span class="k">valeur du stock HT</span></div>
+  </div>
+  ${V.length ? `<div class="viz-card viz"><h2>Chiffre d'affaires HT par jour</h2><div class="sub">Chaque barre = coût d'achat + marge. Touchez une barre pour le détail.</div><div class="viz-legend"><span><i style="background:${VIZ.marge}"></i>Marge HT</span><span><i style="background:${VIZ.cout}"></i>Coût d'achat HT</span></div>${grapheJours(jours)}</div>
+  <div class="viz-card viz"><h2>Marge HT par produit</h2><div class="sub">Les produits qui rapportent le plus, sur la période.</div>${grapheProduits(prods)}</div>
+  <div class="card" style="margin-bottom:16px"><div class="card-head"><h2>Détail par produit</h2></div><div class="table-wrap"><table class="table"><thead><tr><th>Produit</th><th class="right">Vendu</th><th class="right">CA TTC</th><th class="right">CA HT</th><th class="right">Coût HT</th><th class="right">Marge HT</th><th class="right">Marge %</th><th class="right">Coef.</th><th class="right">Reste en stock</th></tr></thead><tbody>${prods.map(x => { const st = Store.get('stock', x.id) || {}; return `<tr><td><strong>${esc(x.nom)}</strong></td><td class="right num">${esc(fmtQty(x.qte) + ' ' + u(x.unite))}</td><td class="right num">${esc(fmtMoney(x.caTTC))}</td><td class="right num">${esc(fmtMoney(x.caHT))}</td><td class="right num">${esc(fmtMoney(x.coutHT))}</td><td class="right num" style="font-weight:800">${esc(fmtMoney(x.margeHT))}</td><td class="right num">${esc(pct(x.caHT > 0 ? x.margeHT / x.caHT : null))}</td><td class="right num">${x.coutHT > 0 ? '×' + esc((x.caTTC / x.coutHT).toFixed(2).replace('.', ',')) : '—'}</td><td class="right num">${st.qte != null ? esc(fmtQty(st.qte) + ' ' + u(st.unite)) : '—'}</td></tr>`; }).join('')}</tbody></table></div></div>` : `<div class="empty" style="margin-bottom:16px"><strong>Aucune vente sur la période.</strong><span>Touchez « Il reste… » sur un produit ci-dessous : je calcule ce qui a été vendu et la marge.</span></div>`}
+  <div class="card" style="margin-bottom:16px"><div class="card-head"><h2>Noter les ventes : il reste combien ?</h2></div>${suivis.length ? `<div class="list">${suivis.map(({ st, p }) => { const m = margeProduit(p, st); return `<div class="list-item"><div class="main"><div class="title">${esc(p.name)}</div><div class="sub">En stock : <b>${esc(fmtQty(num(st.qte) || 0) + ' ' + u(st.unite))}</b>${st.achatHT != null ? ` · achat ${esc(fmtMoney(num(st.achatHT)))} HT` : ''}${p.price != null ? ` · vente ${esc(fmtMoney(num(p.price)))}` : ''}${m ? ` · marge ${esc(fmtMoney(m.marge))}/${esc(u(st.unite))} HT (${esc(pct(m.taux))})` : ''}</div></div><button class="btn btn-xl btn-primary" data-act="streleve" data-id="${esc(p.id)}" style="flex:none;width:auto">Il reste…</button></div>`; }).join('')}</div>` : '<div class="empty"><strong>Aucun produit en stock.</strong><span>Les factures reliées à vos produits remplissent le stock toutes seules.</span></div>'}
+    <p class="help" style="margin:10px 0 0">Bientôt : les ventes de la caisse BM5 (tickets Z) arriveront ici toutes seules, sans relevé.</p></div>
+  ${derniers.length ? `<div class="card"><div class="card-head"><h2>Dernières ventes notées</h2></div><div class="list">${derniers.map(v => `<div class="list-item"><span class="pill pill-info">${v.source === 'caisse' ? 'Caisse' : 'Relevé'}</span><div class="main"><div class="title">${esc(v.produitNom)} · <span class="num">${esc(fmtQty(v.qte) + ' ' + u(v.unite))}</span> à ${esc(fmtMoney(num(v.prixTTC)))} TTC</div><div class="sub">${esc(fmtDate(v.date))} ${esc(v.t || '')} · CA ${esc(fmtMoney(num(v.caTTC)))} TTC${v.margeHT != null ? ' · marge ' + esc(fmtMoney(num(v.margeHT))) + ' HT' : ''}${v.reste != null ? ' · restait ' + esc(fmtQty(v.reste) + ' ' + u(v.unite)) : ''}</div></div><button class="btn btn-sm" data-act="vendel" data-id="${esc(v.id)}">Annuler</button></div>`).join('')}</div></div>` : ''}`;
+};
 
 /* ===================== recettes ===================== */
 const ALLERGENES = ['Gluten', 'Crustacés', 'Œufs', 'Poissons', 'Arachides', 'Soja', 'Lait', 'Fruits à coque', 'Céleri', 'Moutarde', 'Sésame', 'Sulfites', 'Lupin', 'Mollusques'];
@@ -2137,6 +2309,10 @@ const Actions = {
   /* stocks */
   stshow: el => { StockOpts.show = el.dataset.v; render(); },
   stmove: el => openStockMove(el.dataset.id, el.dataset.type),
+  streleve: el => ouvrirReleve(el.dataset.id),
+  savereleve: el => saveReleve(el.dataset.id),
+  ventesper: el => { VentesOpts.per = el.dataset.v; render(); },
+  vendel: el => supprimerVente(el.dataset.id),
   savestmove: el => saveStockMove(el.dataset.id),
   /* recettes */
   newrec: () => openRecForm(null),
@@ -2192,6 +2368,7 @@ const Inputs = {
   search: el => { PriceOpts.q = el.value; render(); },
   psearch: el => { ProdOpts.q = el.value; render(); },
   stsearch: el => { StockOpts.q = el.value; render(); },
+  relcalc: () => apercuReleve(),
   promos: el => { PriceOpts.promos = el.checked; LS.set('promos', el.checked); render(); },
   guides: el => { PriceOpts.guides = el.checked; LS.set('guides', el.checked); render(); },
   marge: el => { PriceOpts.marge = el.checked; LS.set('marge', el.checked); render(); },
@@ -3293,7 +3470,7 @@ setInterval(() => FactLecture.planifier(), 20000);
 /* ---------- mise à jour automatique ----------
    Quand une nouvelle version est publiée, chaque appareil (iPad du comptoir, téléphone) se recharge tout seul
    au premier moment calme : pas de fenêtre ouverte, pas de saisie en cours, pas d'alerte qui sonne, pas d'enregistrement. */
-const APP_VERSION = '4403d2694d';
+const APP_VERSION = '5ee995af03';
 const MiseAJour = {
   attente: null, _t: 0,
   async verifier() {
