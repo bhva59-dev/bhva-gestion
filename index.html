@@ -3271,7 +3271,8 @@ const GABARITS = (() => {
        un produit relié sur le BL est reconnu sur la facture qui suit (et inversement). */
     ldc_bl: {
       nom: 'LDC (Lionor)', texte: /^(?=[\s\S]*BON DE LIVRAISON)(?=[\s\S]*(?:LIONOR|FR58305507303|30550730300017))/, type: 'bl',
-      numero: /B\s*\.?\s*L\s*\.?\s*:?\s*(\d{6,8})\b/, date: /Livraison\s*du\s*:?\s*(\d{2}\/\d{2}\/\d{2,4})/i,
+      numero: (p, t) => (t.match(/B\s*\.?\s*L\s*\.?\s*:?\s*(\d{6,8})\b/) || t.match(/(?:^|[\s:])(\d{7})\s+du\s+\d{2}\/\d{2}\/\d{2,4}/m) || [])[1] || '',   // « B.L. : 1873898 du 02/11/26 » (le « B.L. » est parfois perdu par l'OCR)
+      date: /Livraison\s*du\s*:?\s*(\d{2}\/\d{2}\/\d{2,4})/i,
       ht: (p, t) => totauxBlLionor(p).ht, tvaMontant: (p, t) => totauxBlLionor(p).tva, ttc: (p, t) => totauxBlLionor(p).ttc,
       tvaDetail: (p) => { const x = totauxBlLionor(p); if (x.ht == null || x.tva == null || !x.ht) return []; const tx = r2(x.tva / x.ht * 100); const conn = TAUX.find(k => Math.abs(k - tx) < 0.15); return [{ taux: conn != null ? conn : tx, base: x.ht, montant: x.tva }]; },
       lignes: (pages) => lignesBlLionor(pages)
@@ -3753,7 +3754,7 @@ setInterval(() => FactLecture.planifier(), 20000);
 /* ---------- mise à jour automatique ----------
    Quand une nouvelle version est publiée, chaque appareil (iPad du comptoir, téléphone) se recharge tout seul
    au premier moment calme : pas de fenêtre ouverte, pas de saisie en cours, pas d'alerte qui sonne, pas d'enregistrement. */
-const APP_VERSION = '0861c4f8fe';
+const APP_VERSION = 'fece86c8c4';
 const MiseAJour = {
   attente: null, _t: 0,
   async verifier() {
