@@ -3351,6 +3351,80 @@ function b64VersOctets(b64) { const bin = atob(b64); const u = new Uint8Array(bi
 function octetsVersB64(u) { let s = ''; const P = 0x8000; for (let i = 0; i < u.length; i += P) s += String.fromCharCode.apply(null, u.subarray(i, i + P)); return btoa(s); }
 const factEnLigne = () => Store.mode === 'firebase' && Store.fb;
 
+/* ---------- OCR des PDF scannés (Tesseract.js : gratuit, tourne DANS l'appareil, rien n'est envoyé ailleurs) ----------
+   Le scanner Brother envoie des PDF image (sans texte). Chaque page est dessinée puis les mots sont reconnus avec leur
+   position : on obtient les mêmes « lignes » qu'avec un PDF texte, et les gabarits des fournisseurs s'appliquent tels quels. */
+const OCR_DOSSIER = new URL('lib/ocr/', location.href).href.replace(/\/$/, '');
+const NTFY_FACTURES = 'bhva-factures-bxq7cn';   // téléphone d'Adam (notifications factures)
+let _ocrLibP = null, _ocrWorkerP = null; const _scansLaisses = new Set();
+function chargerOcr() {
+  if (window.Tesseract) return Promise.resolve(window.Tesseract);
+  if (_ocrLibP) return _ocrLibP;
+  _ocrLibP = new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'lib/ocr/tesseract.min.js'; sc.onload = () => res(window.Tesseract); sc.onerror = () => { _ocrLibP = null; rej(new Error('Module OCR introuvable')); }; document.head.appendChild(sc); });
+  return _ocrLibP;
+}
+async function ocrWorker() {
+  if (_ocrWorkerP) return _ocrWorkerP;
+  _ocrWorkerP = (async () => {
+    const T = await chargerOcr();
+    const w = await T.createWorker('fra', 1, { workerPath: OCR_DOSSIER + '/worker.min.js', corePath: OCR_DOSSIER, langPath: OCR_DOSSIER, gzip: true });
+    await w.setParameters({ tessedit_pageseg_mode: '3', preserve_interword_spaces: '1' });
+    return w;
+  })().catch(e => { _ocrWorkerP = null; throw e; });
+  return _ocrWorkerP;
+}
+async function ocrPages(lib, octets, onProgress) {
+  const doc = await lib.getDocument({ data: octets, isEvalSupported: false, disableFontFace: true }).promise;
+  const pages = [];
+  try {
+    const w = await ocrWorker();
+    for (let p = 1; p <= Math.min(doc.numPages, 12); p++) {
+      const page = await doc.getPage(p); const vp1 = page.getViewport({ scale: 1 });
+      const scale = Math.min(4, Math.max(2, 2200 / vp1.width)); const vp = page.getViewport({ scale });
+      const canvas = document.createElement('canvas'); canvas.width = Math.round(vp.width); canvas.height = Math.round(vp.height);
+      const ctx = canvas.getContext('2d', { willReadFrequently: true }); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      if (onProgress) onProgress(p, doc.numPages);
+      const { data } = await w.recognize(canvas, {}, { blocks: true, text: false });
+      const items = [];
+      for (const b of data.blocks || []) for (const par of b.paragraphs || []) for (const L of par.lines || []) {
+        const ly = (L.bbox.y0 + L.bbox.y1) / 2 / scale, lh = (L.bbox.y1 - L.bbox.y0) / scale;
+        for (const m of L.words || []) { const t = String(m.text || '').trim(); if (!t || (m.confidence != null && m.confidence < 15)) continue; items.push({ s: t, x: m.bbox.x0 / scale, y: ly, w: (m.bbox.x1 - m.bbox.x0) / scale, h: Math.max(4, Math.min(lh, 40)) }); }
+      }
+      pages.push({ n: p, w: vp1.width, h: vp1.height, ocr: true, items });
+      canvas.width = canvas.height = 0;
+    }
+  } finally { try { doc.destroy(); } catch (e) { } }
+  return pages.map(pg => ({ n: pg.n, w: pg.w, h: pg.h, ocr: true, items: pg.items, lignes: FactEngine.grouper(pg.items.map(it => Object.assign({}, it))) }));
+}
+const r1 = v => Math.round(v * 10) / 10;
+const pagesOcrCompactes = pages => JSON.stringify(pages.map(pg => ({ n: pg.n, w: r1(pg.w), h: r1(pg.h), i: (pg.items || []).map(it => [it.s, r1(it.x), r1(it.y), r1(it.w), r1(it.h)]) })));
+function pagesOcrDepuis(json) {
+  try { const L = JSON.parse(json); return L.map(pg => { const items = pg.i.map(([s, x, y, w, h]) => ({ s, x, y, w, h })); return { n: pg.n, w: pg.w, h: pg.h, ocr: true, items, lignes: FactEngine.grouper(items.map(it => Object.assign({}, it))) }; }); } catch (e) { return null; }
+}
+async function pagesOcrEnregistrees(id) {
+  if (!factEnLigne()) return null;
+  try { const d = await Store.fb.collection(FACT_TXT).doc(id).get(); return d.exists && d.data().p ? pagesOcrDepuis(d.data().p) : null; } catch (e) { return null; }
+}
+async function reserverOcr(f) {   // un seul appareil fait l'OCR d'une facture (l'iPad ou le PC ; jamais le téléphone)
+  if (Store.mode !== 'firebase' || !Store.fb) return true;
+  const ref = Store.fb.collection('factures').doc(f.id);
+  try {
+    return await Store.fb.runTransaction(async tx => {
+      const d = await tx.get(ref); if (!d.exists) return false; const x = d.data();
+      if (x.lu === 'ocr' && x.ocrPar && x.ocrPar !== Store.deviceId() && Date.now() - new Date(x.ocrLe || 0).getTime() < 10 * 60 * 1000) return false;
+      tx.update(ref, { lu: 'ocr', ocrPar: Store.deviceId(), ocrLe: new Date().toISOString() }); return true;
+    });
+  } catch (e) { return false; }
+}
+async function prevenirScanLu(f, patch) {
+  const n = Object.assign({}, f, patch); const four = n.fournisseur || 'fournisseur à préciser';
+  const titre = (n.lu === 'ok' ? 'Facture scannée lue : ' : 'Facture scannée à vérifier : ') + four;
+  const nl = Array.isArray(n.lignes) ? n.lignes.length : 0; const ar = aRelier(n);
+  const msg = [n.numero ? 'n° ' + n.numero : '', n.ttc != null ? fmtMoney(n.ttc) + ' TTC' : 'montant non lu', nl ? nl + ' ligne' + (nl > 1 ? 's' : '') : 'lignes non lues', ar ? ar + ' à relier à vos produits' : (nl ? 'toutes reliées' : '')].filter(Boolean).join(' · ');
+  try { await fetch('https://ntfy.sh', { method: 'POST', body: JSON.stringify({ topic: NTFY_FACTURES, title: titre, message: msg, priority: 4, tags: [n.lu === 'ok' ? 'white_check_mark' : 'warning'], click: location.href.split('#')[0] + '#factures' }) }); } catch (e) { }
+}
+
 const FactPdf = {
   cache: new Map(),
   async get(f) {
@@ -3380,7 +3454,7 @@ const FactPdf = {
 /* ---------- lecture automatique ---------- */
 const FactLecture = {
   file: [], tourne: false,
-  aLire: f => !!f && !!f.pdf && (f.lu === 'a_lire' || (!f.corrige && f.lu !== 'scan' && (f.luVersion || 0) < GABARITS_VERSION)),
+  aLire: f => !!f && !!f.pdf && !_scansLaisses.has(f.id) && (f.lu === 'a_lire' || (f.lu === 'ocr' && (!f.ocrLe || Date.now() - new Date(f.ocrLe).getTime() > 10 * 60 * 1000)) || (!f.corrige && f.lu !== 'scan' && f.lu !== 'ocr' && (f.luVersion || 0) < GABARITS_VERSION)),
   planifier() {
     if (!factEnLigne()) return;
     nettoyerFactures();
@@ -3414,7 +3488,20 @@ async function lireFacture(f) {
   if (!factAutorisee(f)) return;
   const lib = await chargerPdfJs();
   const octets = await FactPdf.get(f);
-  const pages = await FactEngine.lirePdf(lib, octets.slice());
+  let pages = await FactEngine.lirePdf(lib, octets.slice()); let ocr = false;
+  const sansTexte = pg => FactEngine.texteDe(pg).replace(/\s/g, '').length < 30;
+  if (sansTexte(pages)) {   // PDF image (scanner) : reconnaissance des caractères dans l'appareil
+    const deja = await pagesOcrEnregistrees(f.id);
+    if (deja) { pages = deja; ocr = true; }
+    else {
+      if (window.FORCE_GESTION) { _scansLaisses.add(f.id); return; }   // le téléphone laisse ce travail à l'iPad ou au PC
+      if (!(await reserverOcr(f))) return;
+      toast('Lecture du scan en cours… (première fois : quelques secondes de plus)', '', 6000);
+      try { pages = await ocrPages(lib, octets.slice(), (p, n) => { if (n > 1) toast(`Lecture du scan : page ${p} sur ${n}`); }); ocr = true; }
+      catch (e) { console.warn('OCR', e); await Store.patch('factures', f.id, { lu: 'scan', luNote: 'Lecture du scan impossible : ' + String(e && e.message || e).slice(0, 120), luLe: new Date().toISOString(), luVersion: GABARITS_VERSION }); return; }
+      if (sansTexte(pages)) { await Store.patch('factures', f.id, { lu: 'scan', luNote: 'Scan illisible (page vide ou trop floue)', luLe: new Date().toISOString(), luVersion: GABARITS_VERSION }); return; }
+    }
+  }
   const r = FactEngine.lire(GABARITS, pages, { email: f.mail && f.mail.email, sujet: f.mail && f.mail.sujet, nom: f.pdf && f.pdf.nom, force: !!f.force });
   if (r.lu === 'ignore') {   // avoir, relevé, relance, liste de prix, bon de livraison… : pas une facture → mis de côté (jamais effacé, on peut toujours le revoir)
     await Store.patch('factures', f.id, { lu: 'ignore', ecarte: r.nature || 'autre', luNote: r.note || 'pas une facture', luLe: new Date().toISOString(), luVersion: GABARITS_VERSION });
@@ -3422,6 +3509,7 @@ async function lireFacture(f) {
     return;
   }
   const patch = { lu: r.lu, luLe: new Date().toISOString(), luVersion: GABARITS_VERSION };
+  if (ocr) { patch.ocr = true; patch.ocrPar = null; patch.ocrLe = null; }
   if (f.ecarte) patch.ecarte = null;
   for (const k of ['numero', 'date', 'echeance', 'fournisseur', 'gabarit', 'type']) if (r[k]) patch[k] = r[k];
   const regle = f.source === 'mail' && f.mail ? regleFacture(f.mail.email, f.mail.sujet) : null;
@@ -3433,8 +3521,9 @@ async function lireFacture(f) {
   if (r.note) patch.luNote = r.note;
   if (patch.type === 'avoir') patch.statut = 'na';
   if (!patch.echeance && !f.echeance && patch.date && GABARITS[patch.gabarit] && GABARITS[patch.gabarit].delai != null) patch.echeance = addDays(patch.date, GABARITS[patch.gabarit].delai);
-  try { await Store.fb.collection(FACT_TXT).doc(f.id).set({ t: FactEngine.texteDe(pages).slice(0, 300000), pages: pages.length, le: patch.luLe }); } catch (e) { }
+  try { await Store.fb.collection(FACT_TXT).doc(f.id).set(Object.assign({ t: FactEngine.texteDe(pages).slice(0, 300000), pages: pages.length, le: patch.luLe }, ocr ? { ocr: true, p: pagesOcrCompactes(pages).slice(0, 900000) } : {})); } catch (e) { }
   await Store.patch('factures', f.id, patch);
+  if (ocr && !f.ocr) prevenirScanLu(f, patch);   // le téléphone d'Adam est prévenu du résultat
   await dedoublonner(Object.assign({}, f, patch));
 }
 function cleFacture(f) {
@@ -3485,7 +3574,7 @@ setInterval(() => FactLecture.planifier(), 20000);
 /* ---------- mise à jour automatique ----------
    Quand une nouvelle version est publiée, chaque appareil (iPad du comptoir, téléphone) se recharge tout seul
    au premier moment calme : pas de fenêtre ouverte, pas de saisie en cours, pas d'alerte qui sonne, pas d'enregistrement. */
-const APP_VERSION = '3539a95798';
+const APP_VERSION = 'b7a8fc83c0';
 const MiseAJour = {
   attente: null, _t: 0,
   async verifier() {
@@ -3557,9 +3646,9 @@ function ouvrirFacture(id) {
   const f = Store.get('factures', id); if (!f) return;
   const lignes = Array.isArray(f.lignes) ? f.lignes : [];
   const tvaD = Array.isArray(f.tvaDetail) ? f.tvaDetail : [];
-  const etat = { ok: ['pill-ok', 'Lue automatiquement'], a_verifier: ['pill-warn', 'À vérifier'], a_lire: ['pill-info', 'Lecture en cours…'], scan: ['pill-neutral', 'Scan sans texte'], erreur: ['pill-crit', 'Lecture impossible'] }[f.lu] || null;
+  const etat = { ocr: ['pill-info', 'Lecture du scan en cours…'], ok: ['pill-ok', 'Lue automatiquement'], a_verifier: ['pill-warn', 'À vérifier'], a_lire: ['pill-info', 'Lecture en cours…'], scan: ['pill-neutral', 'Scan sans texte'], erreur: ['pill-crit', 'Lecture impossible'] }[f.lu] || null;
   const body = `<div class="stack">
-    <div class="row" style="flex-wrap:wrap;gap:8px">${f.source === 'mail' ? '<span class="pill pill-info">📧 Reçue par mail</span>' : f.source === 'scan' ? '<span class="pill pill-neutral">📄 PDF ajouté</span>' : ''}${etat ? `<span class="pill ${etat[0]}">${etat[1]}</span>` : ''}${f.type === 'avoir' ? '<span class="pill pill-ok">Avoir</span>' : ''}</div>
+    <div class="row" style="flex-wrap:wrap;gap:8px">${f.source === 'mail' ? '<span class="pill pill-info">📧 Reçue par mail</span>' : f.source === 'scan' ? (f.scan ? '<span class="pill pill-neutral">🖨️ Scannée</span>' : '<span class="pill pill-neutral">📄 PDF ajouté</span>') : ''}${etat ? `<span class="pill ${etat[0]}">${etat[1]}</span>` : ''}${f.type === 'avoir' ? '<span class="pill pill-ok">Avoir</span>' : ''}</div>
     <div class="fact-grid">
       <div><span class="k">Fournisseur</span><b>${esc(f.fournisseur || '—')}</b></div>
       <div><span class="k">Numéro</span><b>${esc(f.numero || '—')}</b></div>
@@ -3728,7 +3817,7 @@ Views.factures = function () {
   let list = all.filter(f => (FactOpts.type === 'tous' || f.type === FactOpts.type || (FactOpts.type === 'verif' && (f.lu === 'a_verifier' || f.lu === 'erreur'))) && (FactOpts.statut === 'tous' || (FactOpts.statut === 'a_payer' ? (estF(f) && f.statut !== 'payee') : f.statut === 'payee')))
     .filter(f => !q || [f.fournisseur, f.numero, f.note, f.mail && f.mail.sujet].join(' ').toLowerCase().includes(q))
     .sort((a, b) => (b.date || '').localeCompare(a.date || '') || String(b.cree || '').localeCompare(String(a.cree || '')));
-  const lu = f => f.lu === 'a_lire' ? '<span class="pill pill-info">lecture…</span>' : f.lu === 'a_verifier' ? '<span class="pill pill-warn">à vérifier</span>' : f.lu === 'erreur' ? '<span class="pill pill-crit">illisible</span>' : f.lu === 'scan' ? '<span class="pill pill-neutral">scan</span>' : '';
+  const lu = f => (f.ocr ? '<span class="pill pill-neutral" title="PDF image lu par reconnaissance de caractères">scanné</span> ' : '') + (f.lu === 'a_lire' ? '<span class="pill pill-info">lecture…</span>' : f.lu === 'ocr' ? '<span class="pill pill-info">lecture du scan…</span>' : f.lu === 'a_verifier' ? '<span class="pill pill-warn">à vérifier</span>' : f.lu === 'erreur' ? '<span class="pill pill-crit">illisible</span>' : f.lu === 'scan' ? '<span class="pill pill-crit">scan illisible</span>' : '');
   const item = f => { const late = estF(f) && f.statut !== 'payee' && f.echeance && f.echeance <= t; const thumb = f.photo ? `<img class="photo-thumb" src="${esc(f.photo.startsWith('data:') ? f.photo : '/_blob/' + f.photo)}" alt="" data-act="viewphoto" data-id="${f.id}" style="cursor:zoom-in">` : `<span class="photo-thumb fact-ico" data-act="${f.pdf ? 'pdfview' : 'factopen'}" data-id="${f.id}">${f.pdf ? '📄' : I.receipt}</span>`;
     return `<div class="list-item fact-item">${thumb}<div class="main" data-act="factopen" data-id="${f.id}" style="cursor:pointer"><div class="title"><span class="pill ${f.type === 'facture' ? 'pill-info' : f.type === 'avoir' ? 'pill-ok' : 'pill-neutral'}">${f.type === 'facture' ? 'Facture' : f.type === 'avoir' ? 'Avoir' : 'BL'}</span> ${esc(f.fournisseur || 'Fournisseur ?')}${f.numero ? ` <span class="muted">n° ${esc(f.numero)}</span>` : ''} ${f.source === 'mail' ? '<span title="reçue par mail">📧</span>' : ''} ${lu(f)}</div><div class="sub">${esc(fmtDate(f.date))}${f.ttc != null ? ` · <b>${esc(fmtMoney(num(f.ttc)))}</b> TTC` : ''}${f.ht != null ? ` · ${esc(fmtMoney(num(f.ht)))} HT` : ''}${f.echeance && estF(f) ? ` · échéance ${esc(fmtDate(f.echeance))}` : ''}${Array.isArray(f.lignes) && f.lignes.length ? ` · ${f.lignes.length} ligne${f.lignes.length > 1 ? 's' : ''}` : ''}${aRelier(f) ? ` · <span class="pill pill-warn">${aRelier(f)} à relier</span>` : f.stock && f.stock.fait ? ' · <span class="pill pill-ok">en stock</span>' : ''}${f.note ? ' · ' + esc(f.note) : ''}</div></div>${estF(f) ? `<span class="pill ${f.statut === 'payee' ? 'pill-ok' : late ? 'pill-crit' : 'pill-warn'}">${f.statut === 'payee' ? 'Payée' : late ? 'Échue' : 'À payer'}</span>${f.statut !== 'payee' ? `<button class="btn btn-sm btn-dark" data-act="factpayee" data-id="${f.id}">✓ Payée</button>` : ''}` : ''}<button class="icon-btn" data-act="editfact" data-id="${f.id}" aria-label="Modifier">${I.pencil}</button></div>`; };
   return `

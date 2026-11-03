@@ -13,7 +13,10 @@
  *   5. envoie une notification sur le téléphone d'Adam (appli gratuite ntfy, sujet NTFY_SUJET) pour chaque nouvelle facture :
  *      la toucher ouvre la conversation avec Claude pour la traiter (fournisseur, gabarit, références → produits) ;
  *   6. repère aussi les mails avec un PDF « facture » venant d'un expéditeur INCONNU (nouveau fournisseur ?) :
- *      ils ne sont pas copiés, mais Adam est prévenu une fois (libellé « BHVA-vu ») pour qu'on les ajoute à la liste.
+ *      ils ne sont pas copiés, mais Adam est prévenu une fois (libellé « BHVA-vu ») pour qu'on les ajoute à la liste ;
+ *   7. toutes les 5 minutes (fonction scans) : les factures SCANNÉES par le Brother ADS-1700W, qui les envoie par mail
+ *      à bhva59@gmail.com (de lui-même à lui-même), sont copiées dans l'appli ; l'iPad (ou le PC) lit ensuite le scan
+ *      par reconnaissance de caractères et prévient le téléphone d'Adam.
  * Relevés, relances, avoirs, bons de livraison, cours, devis… ne sont jamais pris.
  * Nouveau fournisseur : ajouter une ligne dans MAILS_FACTURES.
  */
@@ -64,8 +67,19 @@ const MAILS_FACTURES = [
   { f: 'Shopify', q: 'billing@shopify.com', de: /^billing@shopify\.com$/i, sujet: /^Facture /i, pdf: /\.pdf$/i },
   { f: 'Praninter', q: 'praninter.fr', de: /@praninter\.fr$/i, sujet: /Facture client N\S* FC/i, pdf: /^FC\d+\.pdf$/i },
   { f: 'Seguard', q: 'seguard.fr', de: /@seguard\.fr$/i, sujet: /./, pdf: /^Facture_\d+_\d+\.pdf$/i },
-  { f: 'Hexagonia', q: 'adamibn.c@gmail.com', de: /^adamibn\.?c@gmail\.com$/i, sujet: /Hexagonia - (?:La|Ta) facture du/i, pdf: /^facture-[A-Z0-9]+-\d+\.pdf$/i }
+  { f: 'Hexagonia', q: 'adamibn.c@gmail.com', de: /^adamibn\.?c@gmail\.com$/i, sujet: /Hexagonia - (?:La|Ta) facture du/i, pdf: /^facture-[A-Z0-9]+-\d+\.pdf$/i },
+  // le scanner Brother envoie ses PDF depuis la boîte de la boucherie vers elle-même (fournisseur reconnu ensuite par la lecture)
+  { f: '', q: 'bhva59@gmail.com', de: /^bhva59@gmail\.com$/i, sujet: /./, pdf: /\.pdf$/i, scan: true }
 ];
+/* un mail du scanner : envoyé par la boucherie à elle-même seulement (pas un transfert au comptable) */
+function mailScanner_(msg, regle, email, sujet) {
+  if (!regle.scan) return true;
+  const dest = (String(msg.getTo() || '') + ',' + String(msg.getCc() || '')).toLowerCase();
+  const autres = dest.replace(/bhva59@gmail\.com/g, '').match(/[a-z0-9._%+-]+@[a-z0-9.-]+/g);
+  if (!/bhva59@gmail\.com/.test(dest) || (autres && autres.length)) return false;
+  if (/^\s*(?:fwd?|tr|re)\s*:/i.test(sujet)) return false;
+  return true;
+}
 function regleFacture(email, sujet) {
   email = String(email || '').trim().toLowerCase(); sujet = String(sujet || '').trim();
   for (const r of MAILS_FACTURES) if (r.de.test(email) && r.sujet.test(sujet)) return r;
@@ -77,18 +91,37 @@ function pdfFacture(regle, nom) { return !!regle && regle.pdf.test(String(nom ||
 function installer() {
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('verifier').timeBased().everyHours(1).create();
+  ScriptApp.newTrigger('scans').timeBased().everyMinutes(5).create();
   libelle_();
   PropertiesService.getScriptProperties().deleteProperty('dernier');
   const n = importer_();
   Logger.log('Robot installé. ' + n + ' facture(s) copiée(s) dans l\'appli.');
 }
 
-/* Appelée chaque heure par Google : ne travaille que toutes les 5 heures. */
+/* Appelée chaque heure par Google : ne travaille que toutes les 5 heures (et regarde les scans au passage). */
 function verifier() {
   const p = PropertiesService.getScriptProperties();
   const dernier = Number(p.getProperty('dernier') || 0);
-  if (Date.now() - dernier < CONFIG.HEURES * 3600 * 1000 - 10 * 60 * 1000) return;
+  if (Date.now() - dernier < CONFIG.HEURES * 3600 * 1000 - 10 * 60 * 1000) { try { scans(); } catch (e) { } return; }
   importer_();
+}
+
+/* Toutes les 5 minutes : les factures scannées (mails du scanner Brother, de la boucherie à elle-même). */
+function scans() {
+  const verrou = LockService.getScriptLock();
+  if (!verrou.tryLock(5000)) return 0;
+  let nouvelles = 0;
+  try {
+    const lib = libelle_();
+    const q = 'from:bhva59@gmail.com to:bhva59@gmail.com has:attachment filename:pdf newer_than:3d -label:' + CONFIG.LIBELLE;
+    GmailApp.search(q, 0, 50).forEach(fil => {
+      let toutBon = true;
+      fil.getMessages().forEach(msg => { try { nouvelles += traiterMessage_(msg, null); } catch (e) { toutBon = false; Logger.log('Erreur scan ' + msg.getId() + ' : ' + e); } });
+      if (toutBon) fil.addLabel(lib);
+    });
+    if (nouvelles) PropertiesService.getScriptProperties().setProperty('dernierScan', new Date().toISOString() + ' · ' + nouvelles + ' scan(s)');
+  } finally { verrou.releaseLock(); }
+  return nouvelles;
 }
 
 /* Pour forcer une vérification tout de suite (bouton ▶ sur cette fonction). */
@@ -211,6 +244,7 @@ function traiterMessage_(msg, liste) {
   if (msg.getDate() < CONFIG.DEPUIS) return 0;            // reçu avant le départ : on ne prend pas
   const regle = regleFacture(email, sujet);
   if (!regle) return 0;                                   // pas un mail de facture : on ne prend rien
+  if (!mailScanner_(msg, regle, email, sujet)) return 0;  // mail de la boucherie qui n'est pas un scan (transfert, etc.)
   const pdfs = msg.getAttachments({ includeInlineImages: false }).filter(a => pdfFacture(regle, a.getName()));
   let n = 0;
   pdfs.forEach(a => {
@@ -224,16 +258,18 @@ function traiterMessage_(msg, liste) {
       creer_('factures_pdf', id + '_' + k, { d: b64.slice(k * CONFIG.TAILLE_MORCEAU, (k + 1) * CONFIG.TAILLE_MORCEAU), k: k, n: morceaux });
     }
     const date = Utilities.formatDate(msg.getDate(), 'Europe/Paris', 'yyyy-MM-dd');
-    creer_('factures', id, {
+    const fiche = {
       type: 'facture', fournisseur: regle.f, numero: '', date: date, echeance: '',
       ht: null, tva: null, ttc: null, statut: 'a_payer', note: '', photo: '',
-      source: 'mail', lu: 'a_lire',
+      source: regle.scan ? 'scan' : 'mail', lu: 'a_lire',
       pdf: { n: morceaux, taille: octets.length, sha256: empreinte, nom: a.getName() },
       mail: { id: msg.getId(), de: de, email: email, sujet: sujet, date: msg.getDate().toISOString() },
       cree: new Date().toISOString()
-    });
+    };
+    if (regle.scan) fiche.scan = { de: 'Brother ADS-1700W', le: msg.getDate().toISOString(), nom: a.getName() };
+    creer_('factures', id, fiche);
     n++;
-    if (liste) liste.push({ f: regle.f, sujet: sujet, date: msg.getDate(), mixte: !!regle.mixte });
+    if (liste && !regle.scan) liste.push({ f: regle.f, sujet: sujet, date: msg.getDate(), mixte: !!regle.mixte });
   });
   return n;
 }
