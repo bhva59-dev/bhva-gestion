@@ -4,7 +4,7 @@
  * Gratuit : tourne sur les serveurs de Google (Google Apps Script),
  * même quand le PC et l'iPad sont éteints. Aucune IA, aucun abonnement.
  *
- * Toutes les 5 heures :
+ * Toutes les 5 minutes (fonction toutesLes5Minutes) :
  *   1. regarde UNIQUEMENT les mails de factures connus reçus depuis le 31/10/2026 (liste MAILS_FACTURES ci-dessous :
  *      bon expéditeur + bon objet + bon nom de PDF) ;
  *   2. copie le PDF de la facture dans l'appli BHVA (rubrique Factures) ;
@@ -14,15 +14,16 @@
  *      la toucher ouvre la conversation avec Claude pour la traiter (fournisseur, gabarit, références → produits) ;
  *   6. repère aussi les mails avec un PDF « facture » venant d'un expéditeur INCONNU (nouveau fournisseur ?) :
  *      ils ne sont pas copiés, mais Adam est prévenu une fois (libellé « BHVA-vu ») pour qu'on les ajoute à la liste ;
- *   7. toutes les 5 minutes (fonction scans) : les factures SCANNÉES par le Brother ADS-1700W, qui les envoie par mail
- *      à bhva59@gmail.com (de lui-même à lui-même), sont copiées dans l'appli ; l'iPad (ou le PC) lit ensuite le scan
- *      par reconnaissance de caractères et prévient le téléphone d'Adam.
- * Relevés, relances, avoirs, bons de livraison, cours, devis… ne sont jamais pris.
+ *   7. les documents SCANNÉS par le Brother ADS-1700W (fonction scans), qui les envoie par mail à bhva59@gmail.com
+ *      (de lui-même à lui-même), sont copiés dans l'appli ; l'iPad (ou le PC) lit ensuite le scan par reconnaissance
+ *      de caractères (facture ou bon de livraison ; le reste est mis de côté) et prévient le téléphone d'Adam.
+ * Une fois par heure (fonction verifier) : filet de sécurité si la cadence des 5 minutes s'est arrêtée.
+ * Par mail, relevés, relances, avoirs, cours, devis… ne sont jamais pris (liste blanche).
  * Nouveau fournisseur : ajouter une ligne dans MAILS_FACTURES.
  */
 
 const CONFIG = {
-  HEURES: 5,                 // une vérification toutes les 5 heures
+  MINUTES: 5,                // une vérification toutes les 5 minutes (mails de factures + scans)
   DEPUIS: new Date('2026-10-30T23:00:00Z'), // départ : factures reçues à partir du 31/10/2026 00h00 (heure de Paris)
   LIBELLE: 'BHVA-importee',
   LIBELLE_VU: 'BHVA-vu',                    // mails avec PDF déjà regardés par le repérage des nouveaux fournisseurs
@@ -90,24 +91,34 @@ function pdfFacture(regle, nom) { return !!regle && regle.pdf.test(String(nom ||
 /* ============ À lancer une fois ============ */
 function installer() {
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('toutesLes5Minutes').timeBased().everyMinutes(CONFIG.MINUTES).create();
   ScriptApp.newTrigger('verifier').timeBased().everyHours(1).create();
-  ScriptApp.newTrigger('scans').timeBased().everyMinutes(5).create();
   libelle_();
   PropertiesService.getScriptProperties().deleteProperty('dernier');
   const n = importer_();
-  Logger.log('Robot installé. ' + n + ' facture(s) copiée(s) dans l\'appli.');
+  try { scansSeuls_(); } catch (e) { }
+  Logger.log('Robot installé (vérification toutes les ' + CONFIG.MINUTES + ' minutes). ' + n + ' facture(s) copiée(s) dans l\'appli.');
 }
 
-/* Appelée chaque heure par Google : ne travaille que toutes les 5 heures (et regarde les scans au passage). */
+/* Toutes les 5 minutes : les factures reçues par mail, puis les documents scannés. Rapide quand il n'y a rien de nouveau
+   (une recherche Gmail sur les mails pas encore rangés), donc largement dans les quotas gratuits de Google. */
+function toutesLes5Minutes() {
+  try { importer_(); } catch (e) { Logger.log('Factures par mail : ' + e); }
+  try { scansSeuls_(); } catch (e) { Logger.log('Scans : ' + e); }
+}
+/* Nom historique du déclencheur des 5 minutes (anciennes installations) : fait la même chose. */
+function scans() { toutesLes5Minutes(); }
+
+/* Appelée chaque heure par Google : filet de sécurité (si la cadence des 5 minutes s'est arrêtée, on rattrape). */
 function verifier() {
   const p = PropertiesService.getScriptProperties();
   const dernier = Number(p.getProperty('dernier') || 0);
-  if (Date.now() - dernier < CONFIG.HEURES * 3600 * 1000 - 10 * 60 * 1000) { try { scans(); } catch (e) { } return; }
-  importer_();
+  if (Date.now() - dernier < 50 * 60 * 1000) return;   // le passage des 5 minutes a tourné récemment : rien à faire
+  toutesLes5Minutes();
 }
 
-/* Toutes les 5 minutes : les factures scannées (mails du scanner Brother, de la boucherie à elle-même). */
-function scans() {
+/* Les documents scannés (mails du scanner Brother, de la boucherie à elle-même). */
+function scansSeuls_() {
   const verrou = LockService.getScriptLock();
   if (!verrou.tryLock(5000)) return 0;
   let nouvelles = 0;
