@@ -2956,7 +2956,11 @@ const FactEngine = (() => {
     if (g.statut) { const st = g.statut(pages, texte, outils); if (st) r.statut = st; }
     if (g.tvaDetail) r.tvaDetail = g.tvaDetail(pages, texte, outils) || [];
     if (g.lignes) r.lignes = g.lignes(pages, texte, outils) || [];
-    if (g.type) { const t = g.type(pages, texte, outils); if (t) r.type = t; }
+    if (g.type) { const t = typeof g.type === 'function' ? g.type(pages, texte, outils) : g.type; if (t) r.type = t; }
+    if (g.bls) {   // n° des bons de livraison réglés par cette facture (regex /g avec un groupe, ou fonction → tableau)
+      const v = typeof g.bls === 'function' ? g.bls(pages, texte, outils) : [...texte.matchAll(g.bls)].map(m => String(m[1] || '').trim()).filter(Boolean);
+      if (v && v.length) r.bls = [...new Set(v)];
+    }
     return r;
   }
   const outils = { montant, montants, dateIso, cols, surLigne, sousIntitule, trouverLigne, chercher, r2, RE_DATE };
@@ -2971,13 +2975,18 @@ const FactEngine = (() => {
   /* ---------- est-ce bien une facture ? (relevés, relances, tarifs, BL… sont écartés) ---------- */
   const RE_FICHIER_PAS_FACTURE = /relance|rappel|extrait.?(?:de.?)?compte|relev[ée]|grands?.?livres?|\brib\b|conf_client|conditions|cgv|catalogue|tarif|mercuriale|cours/i;
   const RE_FICHIER_FACTURE = /fact|invoice|avoir|^F[ACS]?[ _-]?\d|^FC\b|^FA\b/i;
+  /* titres de documents administratifs (récépissé, attestation, contrat…) : jamais une facture, sauf si « FACTURE » figure aussi en titre */
+  const RE_TITRE_ADMIN = /^\s*(?:R[ÉE]C[ÉE]PISS[ÉE]|ACCUS[ÉE] DE R[ÉE]CEPTION|ATTESTATION|CERTIFICAT|CONTRAT|CONVENTION|PROC[ÈE]S[- ]VERBAL|CONVOCATION|NOTIFICATION|D[ÉE]CLARATION|BULLETIN DE (?:PAIE|SALAIRE)|FICHE DE PAIE|LETTRE|COURRIER|AVIS D'[ÉE]CH[ÉE]ANCE|AVIS DE (?:PAIEMENT|PR[ÉE]L[ÈE]VEMENT)|BORDEREAU|FORMULAIRE|QUESTIONNAIRE|COMPTE[- ]RENDU)(?![A-Za-zÀ-ÿ])/im;   // (pas \b : il ne reconnaît pas les lettres accentuées)
+  const RE_TITRE_FACTURE = /\bFACTURE\b|\bINVOICE\b|\bFACTUUR\b|\bRECHNUNG\b|\bFATTURA\b/i;
+  const RE_TITRE_BL = /\bBON DE LIVRAISON\b|\bBON DE LIVR\.?\b|\bLEVERINGSBON\b|\bDELIVERY NOTE\b|\bLIEFERSCHEIN\b|\bBORDEREAU DE LIVRAISON\b/i;
   function nature(texte, info = {}) {
     const nom = String(info.nom || ''), sujet = String(info.sujet || '');
     const haut = texte.split('\n').slice(0, 18).join('\n');
     if (RE_FICHIER_PAS_FACTURE.test(nom) && !RE_FICHIER_FACTURE.test(nom)) return 'autre';
     if (/N[°º] b\.l\.\s*\.\s*\.\s*:|TARIF A TITRE INDICATIF, FACTURE FAISANT FOI/i.test(texte.slice(0, 3000))) return 'bl';
-    const titre = texte.split('\n').slice(0, 6).join('\n');   // « BON DE LIVRAISON » en titre (sans « FACTURE ») : un BL, pas une facture
-    if (/\bBON DE LIVRAISON\b|\bLEVERINGSBON\b|\bDELIVERY NOTE\b/i.test(titre) && !/\bFACTURE\b|\bINVOICE\b|\bFACTUUR\b/i.test(titre)) return 'bl';
+    const titre = texte.split('\n').slice(0, 8).join('\n');   // « BON DE LIVRAISON » en titre (sans « FACTURE ») : un BL (lu comme une facture, mais pas à payer)
+    if (RE_TITRE_BL.test(titre) && !RE_TITRE_FACTURE.test(titre)) return 'bl';
+    if (RE_TITRE_ADMIN.test(haut) && !RE_TITRE_FACTURE.test(haut) && !RE_TITRE_BL.test(haut)) return 'autre';
     if (/cours du veau|cours veau|communiquons les cours|mercuriale|liste de prix|prix de la semaine/i.test(haut)) return 'tarif';
     if (/EXTRAIT DE COMPTE|RELEV[ÉE] DE (?:COMPTE|FACTURES)|SITUATION DE (?:VOTRE )?COMPTE|REKENINGUITTREKSEL|GRANDS? LIVRES?|RELEV[ÉE]S? D'IDENTIT[ÉE] BANCAIRE|Confirmation du jour/i.test(haut)) return 'releve';
     if (/^\s*(?:\d+\s*(?:[èe]me|e|ère)\s+)?(?:RELANCE|RAPPEL|MISE EN DEMEURE|AANMANING|HERINNERING)\b/im.test(haut)) return 'relance';
@@ -2985,13 +2994,17 @@ const FactEngine = (() => {
     if (/^\s*(?:DEVIS|BON DE COMMANDE|PRO ?FORMA|BON DE PRISE EN CHARGE)\b/im.test(haut)) return 'commande';
     return 'facture';
   }
-  const NATURE_LIBELLE = { autre: 'pas une facture', bl: 'bon de livraison', tarif: 'liste de prix', releve: 'relevé de compte', relance: 'relance / rappel', commande: 'devis ou commande' };
+  const NATURE_LIBELLE = { autre: 'pas une facture', bl: 'bon de livraison', tarif: 'liste de prix', releve: 'relevé de compte', relance: 'relance / rappel', commande: 'devis ou commande', inconnu: 'document non reconnu (ni facture, ni bon de livraison)' };
 
-  /* ---------- lecture complète ---------- */
+  /* ---------- lecture complète ----------
+     Tout document qui porte des produits, des quantités et/ou des prix est pris en compte : facture, mais aussi bon de
+     livraison (type « bl » : lu et mis en stock comme une facture, jamais « à payer », et rapproché de la facture qui suit).
+     Les relevés, relances, tarifs, avoirs et documents administratifs sont mis de côté. */
   function lire(gabarits, pages, info = {}) {
     const texte = texteDe(pages);
-    const nat = info.force ? 'facture' : nature(texte, info);   // force : l'utilisateur a dit « c'est bien une facture »
-    if (nat !== 'facture') return { lu: 'ignore', nature: nat, note: NATURE_LIBELLE[nat] || 'pas une facture' };
+    let nat = nature(texte, info);
+    if (info.force && nat !== 'bl') nat = 'facture';   // force : l'utilisateur a dit « c'est bien une facture » (ou un BL)
+    if (nat !== 'facture' && nat !== 'bl') return { lu: 'ignore', nature: nat, note: NATURE_LIBELLE[nat] || 'pas une facture' };
     const vide = texte.replace(/\s/g, '').length < 30;
     if (vide) return { lu: 'scan', texte: '', note: 'PDF scanné sans texte' };
     const cle = reconnaitre(gabarits, info.email || '', texte);
@@ -3000,13 +3013,16 @@ const FactEngine = (() => {
     const spec = g ? appliquer(g, pages, texte) : {};
     const r = Object.assign({}, base, ...Object.entries(spec).filter(([k, v]) => v != null && v !== '' && !(Array.isArray(v) && !v.length)).map(([k, v]) => ({ [k]: v })));
     if (g) { r.gabarit = cle; if (typeof g.nom === 'string') r.fournisseur = g.nom; else if (!r.fournisseur && g.nomDefaut) r.fournisseur = g.nomDefaut; }
+    if (!r.type && nat === 'bl') r.type = 'bl';
     // avoir (note de crédit)
     if (!r.type && (/^\s*(?:AVOIR|NOTE DE CR[EÉ]DIT|CREDIT NOTE)\b/im.test(texte) || (r.ttc != null && r.ttc < 0))) r.type = 'avoir';
     if (r.type === 'avoir' && !info.force) return { lu: 'ignore', nature: 'avoir', note: 'avoir (pas une facture)' };
+    const estBl = r.type === 'bl';
     // compléter / contrôler les totaux
     if (r.ht == null && r.ttc != null && r.tvaMontant != null) r.ht = r2(r.ttc - r.tvaMontant - (r.consignes || 0));
     if (r.tvaMontant == null && r.ttc != null && r.ht != null) r.tvaMontant = r2(r.ttc - r.ht);
     if (r.ttc == null && r.ht != null && r.tvaMontant != null) r.ttc = r2(r.ht + r.tvaMontant);
+    if (estBl && r.ttc == null && r.ht == null && r.lignes && r.lignes.length && r.lignes.every(l => l.montant != null)) r.ht = r2(r.lignes.reduce((a, l) => a + l.montant, 0));   // BL avec prix mais sans total : total des lignes
     if (r.tvaDetail && r.tvaDetail.length) {
       const taux = r.tvaDetail.filter(t => t.base).sort((a, b) => b.base - a.base)[0] || r.tvaDetail.slice().sort((a, b) => (b.montant || 0) - (a.montant || 0))[0];
       if (taux) r.tva = taux.taux;
@@ -3014,7 +3030,15 @@ const FactEngine = (() => {
       const t = r.tvaMontant / r.ht * 100; const conn = [0, 2.1, 5.5, 6, 10, 20, 21, 8, 23].find(x => Math.abs(x - t) < 0.15); r.tva = conn != null ? conn : r2(t);
     }
     if (!info.force && info.nom && /conditions|cgv|catalogue|tarif|promotion/i.test(info.nom) && r.ttc == null) return { lu: 'ignore', note: 'Pas une facture' };
-    const ok = r.ttc != null && r.ht != null && r.tvaMontant != null && Math.abs(r.ht + r.tvaMontant + (r.consignes || 0) - r.ttc) <= 0.06 && !!r.numero && !!r.date;
+    const nl = r.lignes ? r.lignes.length : 0;
+    const totauxOk = r.ttc != null && r.ht != null && r.tvaMontant != null && Math.abs(r.ht + r.tvaMontant + (r.consignes || 0) - r.ttc) <= 0.06;
+    /* document scanné (ou PDF ajouté à la main) que rien ne rattache à une facture : fournisseur inconnu, aucun total cohérent,
+       aucune ligne de produit, ni « FACTURE » ni « BON DE LIVRAISON » en tête → mis de côté (Adam est prévenu, rien n'est compté) */
+    if (!info.force && !g && info.source !== 'mail' && !totauxOk && !nl) {
+      const haut = texte.split('\n').slice(0, 25).join('\n');
+      if (!RE_TITRE_FACTURE.test(haut) && !RE_TITRE_BL.test(haut)) return { lu: 'ignore', nature: 'inconnu', note: NATURE_LIBELLE.inconnu };
+    }
+    const ok = estBl ? (!!r.numero && !!r.date && nl > 0 && (r.ttc == null || totauxOk)) : (totauxOk && !!r.numero && !!r.date);
     r.lu = ok ? 'ok' : 'a_verifier';
     if (r.lignes && r.lignes.length && (r.ht != null || r.htMarchandise != null)) {
       const s = r2(r.lignes.reduce((a, l) => a + (l.montant || 0), 0));
@@ -3032,7 +3056,7 @@ if (typeof module !== 'undefined') module.exports = FactEngine;
    où lire le numéro, la date, l'échéance, le total HT, la TVA (taux et montants), le TTC et les lignes.
    Quand on améliore un gabarit, on augmente GABARITS_VERSION : l'appli relit alors toute seule
    les factures déjà importées (sauf celles corrigées à la main). */
-const GABARITS_VERSION = 10;
+const GABARITS_VERSION = 11;
 const GABARITS = (() => {
   const M = FactEngine.montant, MS = FactEngine.montants, D = FactEngine.dateIso, cols = FactEngine.cols;
   const TAUX = [2.1, 5.5, 6, 10, 20, 21, 0];
@@ -3045,6 +3069,70 @@ const GABARITS = (() => {
   // bloc TVA : lignes « … base  taux  montant » situées entre deux repères
   const blocTva = (pages, debut, fin, lire) => { const L = toutes(pages); const i = L.findIndex(t => debut.test(t)); if (i < 0) return []; const out = []; for (let j = i + 1; j < Math.min(L.length, i + 8); j++) { if (fin && fin.test(L[j]) && j > i + 1 && !/\d+[.,]\d{2}\s{2,}\d+[.,]\d{2}\s{2,}(5[.,]50|20[.,]00|10[.,]00|2[.,]10)/.test(L[j])) break; const r = lire(L[j]); if (r && r.base) out.push(r); } return out; };
   const qteCoherente = (qte, pu, montant) => { if (qte == null || !pu || montant == null) return qte; if (Math.abs(qte * pu - montant) <= 0.06) return qte; if (Math.abs(qte * 1000 * pu - montant) <= 0.06) return qte * 1000; const q = montant / pu; return Math.abs(q - Math.round(q * 1000) / 1000) < 0.001 ? Math.round(q * 1000) / 1000 : qte; };
+  const r3 = v => Math.round(v * 1000) / 1000;
+  /* texte OCR d'un tableau : les traits verticaux sont lus « | », « [ », « ] » ou « } » collés aux nombres → on les enlève */
+  const sansTraits = t => String(t).replace(/[|\[\]{}]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  /* ---------- Bon de livraison Lionor (scan) ----------
+     Ligne article : CODE(8) | DÉSIGNATION  EAN(13)  [PVC]  COL  QTE(pièces)  POIDS  UV(K/U/P)  PRIX.U  [#]MONTANT HT
+     puis une ligne par lot : « Lot:3436096075 DLC:09/11/26 Qte:15Pcs 15,030Kg ». Selon la qualité du scan, les colonnes
+     de droite peuvent manquer : on reconstitue (pièces et poids par les lots, prix unitaire = montant / quantité). */
+  const RE_BLL_ART = /^(\d{8})\s+(.+?)\s+(\d{13})\b(.*)$/;
+  const RE_BLL_LOT = /Lot\s*:?\s*(\d{6,})\s+DLC\s*:?\s*(\d{2}\/\d{2}\/\d{2,4})\s+Qte\s*:?\s*(\d+)\s*Pcs\s+(\d[\d ]*,\d{3})\s*Kg/i;
+  function lignesBlLionor(pages) {
+    const out = []; let cur = null;
+    const finir = () => {
+      if (!cur) return;
+      const lots = cur.lots || [];
+      if (cur.pieces == null && lots.length) cur.pieces = lots.reduce((a, l) => a + l.pieces, 0);
+      if (cur.poids == null && lots.length) cur.poids = r3(lots.reduce((a, l) => a + l.kg, 0));
+      const uv = cur.uv || (cur.poids != null ? 'K' : 'U');
+      cur.unite = uv === 'K' ? 'kg' : 'pièce'; cur.qte = uv === 'K' ? cur.poids : cur.pieces;
+      if (cur.pu == null && cur.montant != null && cur.qte > 0) cur.pu = r3(cur.montant / cur.qte);
+      if (cur.montant == null && cur.pu != null && cur.qte > 0) cur.montant = r2(cur.pu * cur.qte);
+      if (lots.length) { cur.dlc = lots.map(l => D(l.dlc)).filter(Boolean).sort()[0] || null; cur.lots = lots.map(l => l.lot); } else delete cur.lots;
+      delete cur.uv;
+      if (cur.qte != null) out.push(cur);
+      cur = null;
+    };
+    for (const brut of toutes(pages)) {
+      const t = sansTraits(brut);
+      const m = t.match(RE_BLL_ART);
+      if (m) {
+        finir();
+        cur = { ref: m[1].slice(-6), ean: m[3], designation: m[2].trim(), lots: [], colis: null, pieces: null, poids: null, uv: null, pu: null, montant: null };
+        const reste = m[4].trim();
+        let c = reste.match(/(?:(\d+)\s+)?(\d+)\s+(\d{1,3}(?: \d{3})*,\d{3})\s+([KUP])\s+(\d+,\d{3})\s+[#*]?\s*(-?\d{1,3}(?: \d{3})*,\d{2})\s*$/);
+        if (c) { cur.colis = c[1] != null ? +c[1] : null; cur.pieces = +c[2]; cur.poids = M(c[3]); cur.uv = c[4]; cur.pu = M(c[5]); cur.montant = M(c[6]); continue; }
+        c = reste.match(/(\d{1,3}(?: \d{3})*,\d{3})\s+(?:([KUP])\s+)?(?:(\d+,\d{3})\s+)?[#*]?\s*(-?\d{1,3}(?: \d{3})*,\d{2})\s*$/);
+        if (c) { cur.poids = M(c[1]); cur.uv = c[2] || null; cur.pu = c[3] ? M(c[3]) : null; cur.montant = M(c[4]); continue; }
+        c = reste.match(/(\d{1,3}(?: \d{3})*,\d{3})\s*$/); if (c) cur.poids = M(c[1]);
+        continue;
+      }
+      const l = t.match(RE_BLL_LOT);
+      if (l && cur) { cur.lots.push({ lot: l[1], dlc: l[2], pieces: +l[3], kg: M(l[4]) }); continue; }
+      if (cur && /^(?:POIDS TOTAL|TOTAL HT|\(\*\)\s*=|P\.V\.C\.)/i.test(t)) finir();
+    }
+    finir();
+    return out;
+  }
+  /* totaux du BL Lionor : ligne « POIDS TOTAL | TOTAL HT. | TVA | TOTAL TTC » puis, dessous, les montants ; le poids a 3 décimales */
+  function totauxBlLionor(pages) {
+    const L = toutes(pages).map(sansTraits); const i = L.findIndex(t => /POIDS\s*TOTAL/i.test(t) && /TOTAL\s*(?:H\.?T|T\.?T\.?C)/i.test(t));
+    const out = { ht: null, tva: null, ttc: null };
+    for (let j = i < 0 ? 0 : i; j < L.length && j <= (i < 0 ? L.length : i + 3); j++) {
+      if (i < 0 && !/\d,\d{3}\s/.test(L[j])) continue;
+      const vals = [...L[j].matchAll(/(?<![\d,.])-?\d{1,3}(?: \d{3})*[.,]\d{2,3}(?![\d,.])/g)].map(m => m[0]);   // lettres parasites collées (« 209,94re ») tolérées
+      const deux = vals.filter(v => /[.,]\d{2}$/.test(v)).map(M).filter(v => v != null);
+      if (deux.length >= 2 && (j > i || i < 0)) {
+        const k = deux.length; out.ttc = deux[k - 1];
+        if (k >= 3 && Math.abs(deux[k - 3] + deux[k - 2] - deux[k - 1]) <= 0.06) { out.ht = deux[k - 3]; out.tva = deux[k - 2]; }
+        else { out.ht = deux[k - 2]; out.tva = r2(out.ttc - out.ht); }
+        break;
+      }
+    }
+    return out;
+  }
 
   /* ---------- Marché de gros de Lomme (Lagache, Sital, Lomme Primeurs) : même logiciel de caisse ---------- */
   const RE_MIN = /\s(-?\d+(?:[.,]\d{1,3})?)\s{2,}(\d+[.,]\d{2,3})\s([A-Z]{1,3})\s{2,}(-?\d+[.,]\d{2})$/;
@@ -3102,6 +3190,14 @@ const GABARITS = (() => {
     },
 
     /* ---------- Chicken Masters (Belgique) ---------- */
+    /* Bon de livraison Chicken Masters (scanné) : quantités et poids, sans prix (la facture arrive ensuite par mail et apporte les prix).
+       Ligne : « 140 DS   HALAL Cuisses de poulet 10kg   10/11/2026   140,00 262206134   300920 » (qté, unité, désignation, DLC, poids kg, n° lot, article).
+       Déclaré AVANT « chickenmasters » (dont le motif reconnaîtrait aussi le BL). */
+    chickenmasters_bl: {
+      nom: 'Chicken Masters', texte: /^(?=[\s\S]*Chicken Masters)(?=[\s\S]*(?:Nom du v[ée]rificateur|Temp[ée]rature des produits|N[°º] tourn[ée]e|Camion\s*:))/i, type: 'bl',
+      numero: /Num[ée]ro\s*:+\s*(V?\d{6,10})\b/i, date: /Date\s*:+\s*(\d{2}\/\d{2}\/\d{4})/,
+      lignes: (pages) => lignesPar(pages, /^(\d+(?:[.,]\d+)?)\s+([A-Z]{2})\s+(.+?)\s{2,}(\d{2}\/\d{2}\/\d{4})\s+(\d+,\d{2})\s+(\d{6,10})(?:\s+(\d{4,8}))?/, (m) => { const poids = M(m[5]); const kg = poids != null && poids > 0; return { ref: m[7] || m[6], lot: m[7] ? m[6] : '', designation: m[3].trim(), dlc: D(m[4]), qte: kg ? poids : M(m[1]), unite: kg ? 'kg' : 'pièce', poids: kg ? poids : null, pu: null, montant: null }; })
+    },
     chickenmasters: {
       nom: 'Chicken Masters', email: /chickenmasters\.be$/i, texte: /Chicken Masters/i,
       numero: /Num[ée]ro\s*:\s*:\s*(\d+)/, date: /Date\s*:\s*:\s*(\d{2}\/\d{2}\/\d{4})/,
@@ -3171,8 +3267,19 @@ const GABARITS = (() => {
     },
 
     /* ---------- LDC / Lionor (volaille) — facture dématérialisée ---------- */
+    /* Bon de livraison Lionor (scanné à la réception) : mêmes colonnes que la facture, sans TVA par ligne. Lots et DLC sous chaque article.
+       Déclaré AVANT « ldc » : son motif « LIONOR » reconnaîtrait aussi le BL. Les références (6 chiffres) sont celles de la facture :
+       un produit relié sur le BL est reconnu sur la facture qui suit (et inversement). */
+    ldc_bl: {
+      nom: 'LDC (Lionor)', texte: /^(?=[\s\S]*BON DE LIVRAISON)(?=[\s\S]*(?:LIONOR|FR58305507303|30550730300017))/, type: 'bl',
+      numero: /B\s*\.?\s*L\s*\.?\s*:?\s*(\d{6,8})\b/, date: /Livraison\s*du\s*:?\s*(\d{2}\/\d{2}\/\d{2,4})/i,
+      ht: (p, t) => totauxBlLionor(p).ht, tvaMontant: (p, t) => totauxBlLionor(p).tva, ttc: (p, t) => totauxBlLionor(p).ttc,
+      tvaDetail: (p) => { const x = totauxBlLionor(p); if (x.ht == null || x.tva == null || !x.ht) return []; const tx = r2(x.tva / x.ht * 100); const conn = TAUX.find(k => Math.abs(k - tx) < 0.15); return [{ taux: conn != null ? conn : tx, base: x.ht, montant: x.tva }]; },
+      lignes: (pages) => lignesBlLionor(pages)
+    },
     ldc: {
       nom: 'LDC (Lionor)', email: /ldc\.fr$/i, texte: /LIONOR|FR58305507303/,
+      bls: /B\.?L\.?\s*:\s*(\d{6,8})\b/g,   // « B.L.: 1872494 Expédition du: 30/10/26 » : le BL que cette facture règle
       numero: /N[°º] Fact\s+(\d+)/, date: /^Date\s+(\d{2}\/\d{2}\/\d{2})\s+N[°º] Fact/m, echeance: /NET le\s+(\d{2}\/\d{2}\/\d{2})/,
       ht: /TOT HT\s+([\d ]*\d,\d{2})/, tvaMontant: /TOT TVA\s+([\d ]*\d,\d{2})/, ttc: /%\s{2,}[\d ]*\d,\d{2}\s{2,}([\d ]*\d,\d{2})\s*EUR/,
       tvaDetail: (p, t) => [...t.matchAll(/(\d[\d ]*,\d{2})\s+\d\s{2,}(\d+,\d{2})%\s{2,}(\d[\d ]*,\d{2})/g)].map(m => ({ base: M(m[1]), taux: M(m[2]), montant: M(m[3]) })),
@@ -3375,11 +3482,54 @@ async function ocrWorker() {
   })().catch(e => { _ocrWorkerP = null; throw e; });
   return _ocrWorkerP;
 }
+/* OCR_VERSION : quand la lecture OCR s'améliore, on l'augmente ; les scans déjà lus sont alors relus (mots enregistrés ignorés) */
+const OCR_VERSION = 2;
+/* mots reconnus par Tesseract → « items » comme ceux de pdf.js (position en points PDF).
+   Chaque mot est posé sur la LIGNE DE BASE de sa ligne (comme le fait pdf.js), et la feuille est « redressée » : une page
+   scannée un peu de travers (0,5° suffit à décaler de 4 pt d'un bord à l'autre) garderait sinon des lignes coupées en deux.
+   Un trait de tableau lu comme « | » n'agrandit plus la ligne, les colonnes restent alignées. */
+function motsOcr(data, scale) {
+  const lignes = []; for (const b of data.blocks || []) for (const par of b.paragraphs || []) for (const L of par.lines || []) lignes.push(L);
+  // pente de la feuille : médiane des pentes des lignes de base (lignes assez longues, au moins 3 mots)
+  const pentes = lignes.filter(L => L.baseline && L.baseline.x1 - L.baseline.x0 > 150 * scale / 3 && (L.words || []).length >= 3).map(L => (L.baseline.y1 - L.baseline.y0) / (L.baseline.x1 - L.baseline.x0)).sort((a, b) => a - b);
+  const pente = pentes.length >= 2 ? pentes[Math.floor(pentes.length / 2)] : 0;
+  const items = []; let somme = 0, poids = 0, couches = 0, debout = 0;
+  for (const L of lignes) {
+    const bl = L.baseline && L.baseline.x1 > L.baseline.x0 ? L.baseline : null, ra = L.rowAttributes || {};
+    const hL = ra.rowHeight || (L.bbox.y1 - L.bbox.y0);
+    for (const m of L.words || []) {
+      const t = String(m.text || '').trim(); if (!t) continue;
+      const mw = m.bbox.x1 - m.bbox.x0, mh = m.bbox.y1 - m.bbox.y0;
+      if (t.length >= 3) { if (mw > mh) couches++; else debout++; }
+      if (t.length >= 2 && m.confidence != null) { somme += m.confidence * t.length; poids += t.length; }
+      if (m.confidence != null && m.confidence < 15) continue;
+      const cx = (m.bbox.x0 + m.bbox.x1) / 2;
+      const base = bl ? bl.y0 + (bl.y1 - bl.y0) * (cx - bl.x0) / (bl.x1 - bl.x0) : m.bbox.y1;   // ligne de base sous le mot
+      const y = base - pente * cx;   // feuille redressée
+      items.push({ s: t, x: m.bbox.x0 / scale, y: y / scale, w: mw / scale, h: Math.max(4, Math.min(hL / scale, 40)), c: m.confidence || 0, bx: m.bbox.x0 / scale, by: m.bbox.y0 / scale, bX: m.bbox.x1 / scale, bY: m.bbox.y1 / scale });
+    }
+  }
+  const conf = poids ? somme / poids : 0; const horizontal = couches + debout ? couches / (couches + debout) : 1;   // texte lu de côté : mots plus hauts que larges
+  return { items, conf, score: conf * (horizontal < 0.6 ? 0.5 : 1), pente };
+}
+/* deux lectures de la même page (modes de découpage différents) : on garde tous les mots, sans doublon (même zone → le plus sûr) */
+function fusionnerMots(A, B) {
+  const chev = (a, b) => { const ix = Math.min(a.bX, b.bX) - Math.max(a.bx, b.bx), iy = Math.min(a.bY, b.bY) - Math.max(a.by, b.by); if (ix <= 0 || iy <= 0) return 0; return ix * iy / Math.max(1e-6, Math.min((a.bX - a.bx) * (a.bY - a.by), (b.bX - b.bx) * (b.bY - b.by))); };
+  const out = A.slice();
+  for (const b of B) {
+    const idx = []; for (let i = 0; i < out.length; i++) if (chev(out[i], b) > 0.5) idx.push(i);
+    if (!idx.length) { if (b.c >= 40) out.push(b); continue; }   // mot vu seulement par la seconde lecture : gardé s'il est sûr (sinon c'est souvent un bout de trait ou de tampon)
+    const meilleurA = Math.max(...idx.map(i => out[i].c));
+    if (b.c >= meilleurA - 3) { for (const i of idx.sort((p, q) => q - p)) out.splice(i, 1); out.push(b); }
+  }
+  return out;
+}
 async function ocrPages(lib, octets, onProgress) {
   const doc = await lib.getDocument({ data: octets, isEvalSupported: false, disableFontFace: true }).promise;
   const pages = [];
   try {
     const w = await ocrWorker();
+    const lecture = async (c, psm) => { await w.setParameters({ tessedit_pageseg_mode: psm, preserve_interword_spaces: '1' }); return w.recognize(c, {}, { blocks: true, text: false }); };
     for (let p = 1; p <= Math.min(doc.numPages, 12); p++) {
       const page = await doc.getPage(p); const vp1 = page.getViewport({ scale: 1 });
       const scale = Math.min(4, Math.max(2, 2200 / vp1.width)); const vp = page.getViewport({ scale });
@@ -3390,21 +3540,24 @@ async function ocrPages(lib, octets, onProgress) {
       /* la feuille a pu être posée à l'envers ou de côté dans le scanner : on essaie les autres sens si la lecture est mauvaise */
       const essai = async deg => {
         const c = deg ? tournerCanvas(canvas, deg) : canvas;
-        const { data } = await w.recognize(c, {}, { blocks: true, text: false });
-        const items = []; let somme = 0, poids = 0, couches = 0, debout = 0;
-        for (const b of data.blocks || []) for (const par of b.paragraphs || []) for (const L of par.lines || []) {
-          const ly = (L.bbox.y0 + L.bbox.y1) / 2 / scale, lh = (L.bbox.y1 - L.bbox.y0) / scale;
-          for (const m of L.words || []) { const t = String(m.text || '').trim(); if (!t) continue; const mw = m.bbox.x1 - m.bbox.x0, mh = m.bbox.y1 - m.bbox.y0; if (t.length >= 3) { if (mw > mh) couches++; else debout++; } if (t.length >= 2 && m.confidence != null) { somme += m.confidence * t.length; poids += t.length; } if (m.confidence != null && m.confidence < 15) continue; items.push({ s: t, x: m.bbox.x0 / scale, y: ly, w: mw / scale, h: Math.max(4, Math.min(lh, 40)) }); }
-        }
+        const { data } = await lecture(c, '3');
         if (c !== canvas) c.width = c.height = 0;
-        const conf = poids ? somme / poids : 0; const horizontal = couches + debout ? couches / (couches + debout) : 1;   // texte lu de côté : mots plus hauts que larges
-        return { deg, items, conf, score: conf * (horizontal < 0.6 ? 0.5 : 1), w: (deg % 180 ? vp1.height : vp1.width), h: (deg % 180 ? vp1.width : vp1.height) };
+        return Object.assign({ deg, w: (deg % 180 ? vp1.height : vp1.width), h: (deg % 180 ? vp1.width : vp1.height) }, motsOcr(data, scale));
       };
       let meilleur = await essai(0); const essais = [[0, Math.round(meilleur.score)]];
       if (meilleur.score < 70) { const e = await essai(180); essais.push([180, Math.round(e.score)]); if (e.score > meilleur.score) meilleur = e; }
       if (meilleur.score < 60) for (const d of [90, 270]) { const e = await essai(d); essais.push([d, Math.round(e.score)]); if (e.score > meilleur.score) meilleur = e; }
-      console.info('OCR page', p, 'orientations essayées', JSON.stringify(essais), '→', meilleur.deg + '°');
-      pages.push({ n: p, w: meilleur.w, h: meilleur.h, ocr: true, rot: meilleur.deg, conf: Math.round(meilleur.conf), items: meilleur.items });
+      /* seconde lecture « bloc uniforme » (mode 6) : dans les tableaux à traits, elle trouve les colonnes que la première rate (quantités, prix…) ; on fusionne */
+      let items = meilleur.items;
+      try {
+        const c2 = meilleur.deg ? tournerCanvas(canvas, meilleur.deg) : canvas;
+        const { data } = await lecture(c2, '6'); const seconde = motsOcr(data, scale);
+        if (c2 !== canvas) c2.width = c2.height = 0;
+        items = fusionnerMots(meilleur.items, seconde.items);
+        essais.push(['bloc', Math.round(seconde.conf), seconde.items.length, '→', items.length]);
+      } catch (e) { console.warn('OCR seconde lecture', e); }
+      console.info('OCR page', p, 'lectures', JSON.stringify(essais), '→', meilleur.deg + '°');
+      pages.push({ n: p, w: meilleur.w, h: meilleur.h, ocr: true, rot: meilleur.deg, conf: Math.round(meilleur.conf), items: items.map(it => ({ s: it.s, x: it.x, y: it.y, w: it.w, h: it.h })) });
       canvas.width = canvas.height = 0;
     }
   } finally { try { doc.destroy(); } catch (e) { } }
@@ -3421,7 +3574,7 @@ function pagesOcrDepuis(json) {
 }
 async function pagesOcrEnregistrees(id) {
   if (!factEnLigne()) return null;
-  try { const d = await Store.fb.collection(FACT_TXT).doc(id).get(); return d.exists && d.data().p ? pagesOcrDepuis(d.data().p) : null; } catch (e) { return null; }
+  try { const d = await Store.fb.collection(FACT_TXT).doc(id).get(); return d.exists && d.data().p && d.data().v === OCR_VERSION ? pagesOcrDepuis(d.data().p) : null; } catch (e) { return null; }   // lecture OCR plus ancienne : on refait
 }
 async function reserverOcr(f) {   // un seul appareil fait l'OCR d'une facture (l'iPad ou le PC ; jamais le téléphone)
   if (Store.mode !== 'firebase' || !Store.fb) return true;
@@ -3436,10 +3589,15 @@ async function reserverOcr(f) {   // un seul appareil fait l'OCR d'une facture (
 }
 async function prevenirScanLu(f, patch) {
   const n = Object.assign({}, f, patch); const four = n.fournisseur || 'fournisseur à préciser';
-  const titre = (n.lu === 'ok' ? 'Facture scannée lue : ' : 'Facture scannée à vérifier : ') + four;
+  const quoi = n.type === 'bl' ? 'Bon de livraison scanné' : n.type === 'avoir' ? 'Avoir scanné' : 'Facture scannée';
+  const titre = `${quoi} ${n.lu === 'ok' ? (n.type === 'bl' ? 'lu' : 'lue') : 'à vérifier'} : ${four}`;
   const nl = Array.isArray(n.lignes) ? n.lignes.length : 0; const ar = aRelier(n);
-  const msg = [n.numero ? 'n° ' + n.numero : '', n.ttc != null ? fmtMoney(n.ttc) + ' TTC' : 'montant non lu', nl ? nl + ' ligne' + (nl > 1 ? 's' : '') : 'lignes non lues', ar ? ar + ' à relier à vos produits' : (nl ? 'toutes reliées' : '')].filter(Boolean).join(' · ');
+  const msg = [n.numero ? 'n° ' + n.numero : '', n.ttc != null ? fmtMoney(n.ttc) + ' TTC' : (n.type === 'bl' ? 'sans prix (la facture suivra)' : 'montant non lu'), nl ? nl + ' ligne' + (nl > 1 ? 's' : '') : 'lignes non lues', ar ? ar + ' à relier à vos produits' : (nl ? 'toutes reliées' : '')].filter(Boolean).join(' · ');
   try { await fetch('https://ntfy.sh', { method: 'POST', body: JSON.stringify({ topic: NTFY_FACTURES, title: titre, message: msg, priority: 4, tags: [n.lu === 'ok' ? 'white_check_mark' : 'warning'], click: location.href.split('#')[0] + '#factures' }) }); } catch (e) { }
+}
+async function prevenirScanEcarte(f, r) {   // document scanné qui n'est ni une facture ni un BL : Adam est prévenu, rien n'est compté
+  const msg = `${r.note || 'pas une facture'} · le document reste visible dans « mis de côté » (bouton « C'est bien une facture » si l'appli se trompe)`;
+  try { await fetch('https://ntfy.sh', { method: 'POST', body: JSON.stringify({ topic: NTFY_FACTURES, title: 'Document scanné mis de côté : ' + (f.fournisseur || 'inconnu'), message: msg, priority: 3, tags: ['file_folder'], click: location.href.split('#')[0] + '#factures' }) }); } catch (e) { }
 }
 
 const FactPdf = {
@@ -3519,26 +3677,31 @@ async function lireFacture(f) {
       if (sansTexte(pages)) { await Store.patch('factures', f.id, { lu: 'scan', luNote: 'Scan illisible (page vide ou trop floue)', luLe: new Date().toISOString(), luVersion: GABARITS_VERSION }); return; }
     }
   }
-  const r = FactEngine.lire(GABARITS, pages, { email: f.mail && f.mail.email, sujet: f.mail && f.mail.sujet, nom: f.pdf && f.pdf.nom, force: !!f.force });
-  if (r.lu === 'ignore') {   // avoir, relevé, relance, liste de prix, bon de livraison… : pas une facture → mis de côté (jamais effacé, on peut toujours le revoir)
-    await Store.patch('factures', f.id, { lu: 'ignore', ecarte: r.nature || 'autre', luNote: r.note || 'pas une facture', luLe: new Date().toISOString(), luVersion: GABARITS_VERSION });
+  const r = FactEngine.lire(GABARITS, pages, { email: f.mail && f.mail.email, sujet: f.mail && f.mail.sujet, nom: f.pdf && f.pdf.nom, force: !!f.force, source: f.source, scan: !!f.scan });
+  if (r.lu === 'ignore') {   // avoir, relevé, relance, liste de prix, document administratif… : ni facture ni bon de livraison → mis de côté (jamais effacé, on peut toujours le revoir)
+    await Store.patch('factures', f.id, Object.assign({ lu: 'ignore', ecarte: r.nature || 'autre', luNote: r.note || 'pas une facture', luLe: new Date().toISOString(), luVersion: GABARITS_VERSION }, ocr ? { ocr: true, ocrPar: null, ocrLe: null } : {}));
+    try { await Store.fb.collection(FACT_TXT).doc(f.id).set(Object.assign({ t: FactEngine.texteDe(pages).slice(0, 300000), pages: pages.length, le: new Date().toISOString() }, ocr ? { ocr: true, v: OCR_VERSION, p: pagesOcrCompactes(pages).slice(0, 900000) } : {})); } catch (e) { }
     toast(`Mis de côté : ${f.fournisseur || 'document'} (${r.note || 'pas une facture'})`);
+    if (ocr && !f.ocr) prevenirScanEcarte(f, r);
     return;
   }
   const patch = { lu: r.lu, luLe: new Date().toISOString(), luVersion: GABARITS_VERSION };
   if (ocr) { patch.ocr = true; patch.ocrPar = null; patch.ocrLe = null; patch.ocrRot = pages.map(pg => pg.rot || 0); patch.ocrConf = Math.round(pages.reduce((a, pg) => a + (pg.conf || 0), 0) / Math.max(1, pages.length)); }
   if (f.ecarte) patch.ecarte = null;
   for (const k of ['numero', 'date', 'echeance', 'fournisseur', 'gabarit', 'type']) if (r[k]) patch[k] = r[k];
+  if (f.corrige && f.type && f.type !== patch.type && !r.gabarit) patch.type = f.type;   // type choisi à la main (sans gabarit connu) : on le respecte
   const regle = f.source === 'mail' && f.mail ? regleFacture(f.mail.email, f.mail.sujet) : null;
   if (regle) patch.fournisseur = regle.f;   // le nom officiel du fournisseur, d'après son mail de facture
   for (const k of ['ht', 'ttc', 'tvaMontant', 'tva', 'htMarchandise', 'consignes']) if (r[k] != null) patch[k] = r[k];
   if (r.statut === 'payee' && f.statut !== 'payee') { patch.statut = 'payee'; patch.payeeLe = r.date || todayStr(); }
   if (r.tvaDetail && r.tvaDetail.length) patch.tvaDetail = r.tvaDetail;
   if (r.lignes && r.lignes.length) { patch.lignes = r.lignes.slice(0, 200); patch.lignesOk = !!r.lignesOk; }
+  if (r.bls && r.bls.length) patch.bls = r.bls.slice(0, 20);   // n° des bons de livraison que cette facture règle (sert à ne pas compter deux fois le stock)
   if (r.note) patch.luNote = r.note;
-  if (patch.type === 'avoir') patch.statut = 'na';
-  if (!patch.echeance && !f.echeance && patch.date && GABARITS[patch.gabarit] && GABARITS[patch.gabarit].delai != null) patch.echeance = addDays(patch.date, GABARITS[patch.gabarit].delai);
-  try { await Store.fb.collection(FACT_TXT).doc(f.id).set(Object.assign({ t: FactEngine.texteDe(pages).slice(0, 300000), pages: pages.length, le: patch.luLe }, ocr ? { ocr: true, p: pagesOcrCompactes(pages).slice(0, 900000) } : {})); } catch (e) { }
+  if (patch.type === 'avoir' || patch.type === 'bl') { patch.statut = 'na'; patch.echeance = ''; }   // un BL ne se paie pas : c'est la facture qui suivra
+  else if (f.statut === 'na' && !f.corrige) patch.statut = 'a_payer';
+  if (!patch.echeance && !f.echeance && patch.date && patch.type !== 'bl' && GABARITS[patch.gabarit] && GABARITS[patch.gabarit].delai != null) patch.echeance = addDays(patch.date, GABARITS[patch.gabarit].delai);
+  try { await Store.fb.collection(FACT_TXT).doc(f.id).set(Object.assign({ t: FactEngine.texteDe(pages).slice(0, 300000), pages: pages.length, le: patch.luLe }, ocr ? { ocr: true, v: OCR_VERSION, p: pagesOcrCompactes(pages).slice(0, 900000) } : {})); } catch (e) { }
   await Store.patch('factures', f.id, patch);
   if (ocr && !f.ocr) prevenirScanLu(f, patch);   // le téléphone d'Adam est prévenu du résultat
   await dedoublonner(Object.assign({}, f, patch));
@@ -3548,7 +3711,7 @@ function cleFacture(f) {
   if (brut.length < 3 || !/\d/.test(brut)) return '';   // numéro douteux : jamais de suppression
   const n = brut.toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^0+/, '');
   const four = String(f.gabarit || f.fournisseur || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  return n && four ? four + '|' + (f.type === 'avoir' ? 'A' : '') + n : '';
+  return n && four ? four + '|' + (f.type === 'avoir' ? 'A' : f.type === 'bl' ? 'B' : '') + n : '';   // un BL et une facture peuvent porter le même numéro : jamais confondus
 }
 async function dedoublonner(f) {
   const k = cleFacture(f); if (!k) return;
@@ -3591,7 +3754,7 @@ setInterval(() => FactLecture.planifier(), 20000);
 /* ---------- mise à jour automatique ----------
    Quand une nouvelle version est publiée, chaque appareil (iPad du comptoir, téléphone) se recharge tout seul
    au premier moment calme : pas de fenêtre ouverte, pas de saisie en cours, pas d'alerte qui sonne, pas d'enregistrement. */
-const APP_VERSION = '489b64a419';
+const APP_VERSION = '0861c4f8fe';
 const MiseAJour = {
   attente: null, _t: 0,
   async verifier() {
@@ -3665,7 +3828,7 @@ function ouvrirFacture(id) {
   const tvaD = Array.isArray(f.tvaDetail) ? f.tvaDetail : [];
   const etat = { ocr: ['pill-info', 'Lecture du scan en cours…'], ok: ['pill-ok', 'Lue automatiquement'], a_verifier: ['pill-warn', 'À vérifier'], a_lire: ['pill-info', 'Lecture en cours…'], scan: ['pill-neutral', 'Scan sans texte'], erreur: ['pill-crit', 'Lecture impossible'] }[f.lu] || null;
   const body = `<div class="stack">
-    <div class="row" style="flex-wrap:wrap;gap:8px">${f.source === 'mail' ? '<span class="pill pill-info">📧 Reçue par mail</span>' : f.source === 'scan' ? (f.scan ? '<span class="pill pill-neutral">🖨️ Scannée</span>' : '<span class="pill pill-neutral">📄 PDF ajouté</span>') : ''}${etat ? `<span class="pill ${etat[0]}">${etat[1]}</span>` : ''}${f.type === 'avoir' ? '<span class="pill pill-ok">Avoir</span>' : ''}</div>
+    <div class="row" style="flex-wrap:wrap;gap:8px">${f.source === 'mail' ? '<span class="pill pill-info">📧 Reçue par mail</span>' : f.source === 'scan' ? (f.scan ? '<span class="pill pill-neutral">🖨️ Scannée</span>' : '<span class="pill pill-neutral">📄 PDF ajouté</span>') : ''}${etat ? `<span class="pill ${etat[0]}">${etat[1]}</span>` : ''}${f.type === 'avoir' ? '<span class="pill pill-ok">Avoir</span>' : f.type === 'bl' ? '<span class="pill pill-neutral" title="Bon de livraison : marchandises et quantités (et prix s\'il y en a). Il entre en stock ; la facture qui suivra ne comptera pas deux fois.">📦 Bon de livraison</span>' : ''}${Array.isArray(f.bls) && f.bls.length ? `<span class="pill pill-neutral" title="bons de livraison réglés par cette facture">BL n° ${esc(f.bls.join(', '))}</span>` : ''}</div>
     <div class="fact-grid">
       <div><span class="k">Fournisseur</span><b>${esc(f.fournisseur || '—')}</b></div>
       <div><span class="k">Numéro</span><b>${esc(f.numero || '—')}</b></div>
@@ -3674,11 +3837,11 @@ function ouvrirFacture(id) {
       <div><span class="k">Total HT</span><b class="num">${esc(fmtMoney(num(f.ht)))}</b></div>
       <div><span class="k">TVA</span><b class="num">${esc(fmtMoney(num(f.tvaMontant)))}${f.tva != null ? ` <small class="muted">(${esc(String(f.tva).replace('.', ','))} %)</small>` : ''}</b></div>
       <div><span class="k">Total TTC</span><b class="num">${esc(fmtMoney(num(f.ttc)))}</b></div>${f.consignes ? `<div><span class="k">Consignes (caisses)</span><b class="num">${esc(fmtMoney(num(f.consignes)))}</b></div>` : ''}
-      <div><span class="k">Statut</span><b>${f.type === 'avoir' ? 'Avoir' : f.statut === 'payee' ? 'Payée' : 'À payer'}</b></div>
+      <div><span class="k">Statut</span><b>${f.type === 'avoir' ? 'Avoir' : f.type === 'bl' ? 'Bon de livraison (pas à payer : la facture suivra)' : f.statut === 'payee' ? 'Payée' : 'À payer'}</b></div>
     </div>
     ${tvaD.length ? `<div class="card-sub"><div class="eyebrow">Détail TVA</div><table class="table"><thead><tr><th>Taux</th><th class="right">Base HT</th><th class="right">TVA</th></tr></thead><tbody>${tvaD.map(t => `<tr><td>${esc(String(t.taux).replace('.', ','))} %</td><td class="right num">${esc(fmtMoney(t.base))}</td><td class="right num">${esc(fmtMoney(t.montant))}</td></tr>`).join('')}</tbody></table></div>` : ''}
-    ${lignes.length ? `<div class="card-sub"><div class="eyebrow">Lignes de la facture (${lignes.length})${f.lignesOk === false ? ' · <span class="pill pill-warn">total à vérifier</span>' : ''}${aRelier(f) ? ` · <span class="pill pill-warn">${aRelier(f)} à relier à vos produits</span>` : ' · <span class="pill pill-ok">toutes reliées à vos produits</span>'}</div><div class="table-wrap"><table class="table"><thead><tr><th>Réf.</th><th>Désignation</th><th class="right">Qté</th><th class="right">PU HT</th><th class="right">Montant</th><th>Chez nous</th></tr></thead><tbody>${lignes.map((l, i) => `<tr><td class="muted">${esc(l.ref || '')}</td><td>${esc(l.designation || '')}</td><td class="right num">${esc(l.qte != null ? fmtQty(l.qte) : '')}${l.unite ? ' ' + esc(l.unite) : ''}${l.pieces && l.unite === 'kg' ? ` <small class="muted">(${esc(String(l.pieces))} p.)</small>` : ''}</td><td class="right num">${esc(l.pu != null ? fmtMoney(l.pu) : '')}</td><td class="right num">${esc(l.montant != null ? fmtMoney(l.montant) : '')}</td><td>${lienLigne(f, l, i)}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
-    ${f.stock && f.stock.fait ? `<div class="notice" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span><b>✓ Entrée en stock</b> le ${esc(fmtDateTime(f.stock.le))} : ${esc((f.stock.lignes || []).map(x => { const p = Store.get('produits', x.produitId); return `${p ? p.name : 'produit'} +${fmtQty(x.qte)} ${UNIT_NAME[x.unite] || x.unite}${x.achatHT != null ? ' à ' + fmtMoney(x.achatHT) + ' HT' : ''}`; }).join(' · '))}</span><button class="btn btn-sm" data-act="factdestock" data-id="${esc(id)}" style="margin-left:auto">Annuler l'entrée</button></div>` : stockPossible(f) ? `<button class="btn btn-xl btn-primary" data-act="factstock" data-id="${esc(id)}">📦 Mettre en stock</button>` : ''}
+    ${lignes.length ? `<div class="card-sub"><div class="eyebrow">Lignes ${f.type === 'bl' ? 'du bon de livraison' : 'de la facture'} (${lignes.length})${f.lignesOk === false ? ' · <span class="pill pill-warn">total à vérifier</span>' : ''}${aRelier(f) ? ` · <span class="pill pill-warn">${aRelier(f)} à relier à vos produits</span>` : ' · <span class="pill pill-ok">toutes reliées à vos produits</span>'}</div><div class="table-wrap"><table class="table"><thead><tr><th>Réf.</th><th>Désignation</th><th class="right">Qté</th><th class="right">PU HT</th><th class="right">Montant</th><th>Chez nous</th></tr></thead><tbody>${lignes.map((l, i) => `<tr><td class="muted">${esc(l.ref || '')}</td><td>${esc(l.designation || '')}</td><td class="right num">${esc(l.qte != null ? fmtQty(l.qte) : '')}${l.unite ? ' ' + esc(l.unite) : ''}${l.pieces && l.unite === 'kg' ? ` <small class="muted">(${esc(String(l.pieces))} p.)</small>` : ''}</td><td class="right num">${esc(l.pu != null ? fmtMoney(l.pu) : '')}</td><td class="right num">${esc(l.montant != null ? fmtMoney(l.montant) : '')}</td><td>${lienLigne(f, l, i)}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
+    ${f.stock && f.stock.fait ? `<div class="notice" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span><b>✓ Entrée en stock</b> le ${esc(fmtDateTime(f.stock.le))} : ${esc((f.stock.lignes || []).map(x => { const p = Store.get('produits', x.produitId); return x.entre === false ? `${p ? p.name : 'produit'} ${fmtQty(x.qte)} ${UNIT_NAME[x.unite] || x.unite} (déjà compté par ${jumeauLibelle(x.jumeau)})` : `${p ? p.name : 'produit'} +${fmtQty(x.qte)} ${UNIT_NAME[x.unite] || x.unite}${x.achatHT != null ? ' à ' + fmtMoney(x.achatHT) + ' HT' : ''}${x.jumeau ? ' (prix de ' + jumeauLibelle(x.jumeau) + ')' : ''}`; }).join(' · '))}</span><button class="btn btn-sm" data-act="factdestock" data-id="${esc(id)}" style="margin-left:auto">Annuler l'entrée</button></div>` : stockPossible(f) ? `<button class="btn btn-xl btn-primary" data-act="factstock" data-id="${esc(id)}">📦 Mettre en stock</button>` : ''}
     ${f.mail ? `<p class="help">Mail : « ${esc(f.mail.sujet || '')} » de ${esc(f.mail.de || '')}</p>` : ''}
   </div>`;
   openModal({ title: `${f.fournisseur || 'Facture'}${f.numero ? ' · n° ' + f.numero : ''}`, body, footer: `${f.pdf ? `<button class="btn btn-xl" data-act="pdfview" data-id="${esc(id)}">📄 Voir le PDF</button>` : ''}${f.pdf ? `<button class="btn" data-act="factrelire" data-id="${esc(id)}">↻ Relire</button>` : ''}<button class="btn" data-act="editfact" data-id="${esc(id)}">${I.pencil} Corriger</button><button class="btn btn-primary" data-close="1">Fermer</button>` });
@@ -3776,7 +3939,32 @@ function lignesStock(f) {
   return out;
 }
 const aPreciser = f => lignesStock(f).filter(x => !x.p || x.qte == null || !(x.qte > 0)).length;
-function stockPossible(f) { return !!f && f.type === 'facture' && !f.ecarte && (f.lu === 'ok' || !!f.corrige) && Array.isArray(f.lignes) && f.lignes.length > 0 && !aRelier(f) && !aPreciser(f) && !(f.stock && f.stock.fait); }
+function stockPossible(f) { return !!f && (f.type === 'facture' || f.type === 'bl') && !f.ecarte && (f.lu === 'ok' || !!f.corrige) && Array.isArray(f.lignes) && f.lignes.length > 0 && !aRelier(f) && !aPreciser(f) && !(f.stock && f.stock.fait); }
+/* Un bon de livraison puis sa facture (ou l'inverse) portent les mêmes marchandises : la quantité n'entre qu'UNE fois en stock.
+   Pour une ligne à entrer, on cherche dans les documents de l'autre type (même fournisseur, à moins de 25 jours, déjà en stock)
+   une ligne du même produit et de la même quantité (à 2 % près) pas encore rapprochée ; en premier les documents qui se citent
+   (la facture Lionor indique le n° du BL). Trouvée : pas de nouvelle entrée, et si c'est la facture qui arrive, elle apporte le prix. */
+const joursEntre = (a, b) => Math.abs((new Date((a || '') + 'T12:00:00Z') - new Date((b || '') + 'T12:00:00Z')) / 864e5);
+function jumeauLigne(f, x, pris) {
+  if (f.type !== 'bl' && f.type !== 'facture') return null;
+  const autre = f.type === 'bl' ? 'facture' : 'bl'; const four = slugRef(f.fournisseur); const d0 = f.date || todayStr();
+  const cite = e => (Array.isArray(f.bls) && e.numero && f.bls.map(String).includes(String(e.numero))) || (Array.isArray(e.bls) && f.numero && e.bls.map(String).includes(String(f.numero)));
+  const cands = Store.all('factures').filter(e => e.id !== f.id && e.type === autre && !e.ecarte && slugRef(e.fournisseur) === four && e.stock && e.stock.fait && Array.isArray(e.stock.lignes) && (cite(e) || joursEntre(e.date || d0, d0) <= 25))
+    .sort((a, b) => (cite(b) ? 1 : 0) - (cite(a) ? 1 : 0) || joursEntre(a.date || d0, d0) - joursEntre(b.date || d0, d0));
+  for (const e of cands) for (let j = 0; j < e.stock.lignes.length; j++) {
+    const y = e.stock.lignes[j]; const k = e.id + ':' + j;
+    if (y.jumeau || y.entre === false || pris.has(k) || y.produitId !== x.p.id) continue;
+    if (Math.abs((num(y.qte) || 0) - x.qte) <= Math.max(0.02 * x.qte, 0.011)) return { e, j, k, y };
+  }
+  return null;
+}
+function jumeauLibelle(cle) { const e = Store.get('factures', String(cle || '').split(':')[0]); return e ? `${e.type === 'bl' ? 'le BL' : 'la facture'}${e.numero ? ' n° ' + e.numero : ''}` : 'un autre document'; }
+async function dejumeler(id) {   // le document sort du stock : les lignes des autres documents qui lui étaient rapprochées redeviennent libres
+  for (const e of Store.all('factures')) {
+    if (!e.stock || !Array.isArray(e.stock.lignes) || !e.stock.lignes.some(y => y.jumeau && String(y.jumeau).split(':')[0] === id)) continue;
+    await Store.set('factures', e.id, Object.assign({}, e, { stock: Object.assign({}, e.stock, { lignes: e.stock.lignes.map(y => y.jumeau && String(y.jumeau).split(':')[0] === id ? Object.assign({}, y, { jumeau: null }) : y) }) }));
+  }
+}
 async function reserverStock(id) {   // un seul appareil met la facture en stock (évite les doublons si deux appareils la voient en même temps)
   if (Store.mode !== 'firebase' || !Store.fb) return true;
   const ref = Store.fb.collection('factures').doc(id);
@@ -3793,28 +3981,59 @@ async function mettreEnStock(id, manuel) {
   if (!stockPossible(f)) { if (manuel) toast(aRelier(f) ? 'Reliez d\'abord toutes les lignes à vos produits' : aPreciser(f) ? 'Une quantité est à préciser' : 'Déjà dans le stock', 'err'); return false; }
   if (!(await reserverStock(id))) { if (manuel) toast('Facture déjà en cours d\'entrée en stock sur un autre appareil'); return false; }
   const L = lignesStock(f); const tva = tauxTvaFacture(f); const maintenant = new Date().toISOString();
+  const libDoc = `${f.type === 'bl' ? 'BL' : 'Facture'} ${f.fournisseur || ''}${f.numero ? ' n° ' + f.numero : ''}`;
+  const pris = new Set(), lignesDoc = [], entrees = [], jumelees = [], marques = new Map();
   for (const x of L) {
-    if (Store.get('mouvements', 'mv-' + id + '-' + x.i)) continue;   // déjà entré (facture remise après avoir été effacée) : jamais deux fois en stock
+    const ligneDoc = { i: x.i, produitId: x.p.id, qte: x.qte, unite: x.unite, achatHT: x.achatHT };
+    const dejaMv = !!Store.get('mouvements', 'mv-' + id + '-' + x.i);   // déjà entré (facture remise après avoir été effacée) : jamais deux fois en stock
+    const jm = dejaMv ? null : jumeauLigne(f, x, pris);
+    if (jm) {   // même marchandise déjà entrée par le BL (ou la facture) : pas de seconde entrée
+      pris.add(jm.k); ligneDoc.entre = false; ligneDoc.jumeau = jm.k; lignesDoc.push(ligneDoc); jumelees.push({ x, jm });
+      if (!marques.has(jm.e.id)) marques.set(jm.e.id, []); marques.get(jm.e.id).push({ j: jm.j, cle: id + ':' + x.i });
+      if (f.type === 'facture' && x.achatHT != null) {   // la facture apporte le prix : stock et mouvement du BL mis à jour
+        const st = Store.get('stock', x.p.id);
+        if (st) {
+          const q = num(st.qte) || 0, pa = num(st.achatHT); const ancien = num(jm.y.achatHT) ?? pa;
+          const achat = pa != null && ancien != null && q > x.qte ? Math.round((pa * q - ancien * x.qte + x.achatHT * x.qte) / q * 10000) / 10000 : x.achatHT;
+          await Store.set('stock', x.p.id, Object.assign({}, st, { achatHT: achat, dernierAchatHT: x.achatHT, achatTva: tva != null ? tva : (st.achatTva ?? null), achatLe: f.date || todayStr(), achatFournisseur: f.fournisseur || '', achatFacture: f.numero || '', maj: maintenant }));
+        }
+        const mv = Store.get('mouvements', 'mv-' + jm.e.id + '-' + jm.y.i);
+        if (mv) await Store.set('mouvements', 'mv-' + jm.e.id + '-' + jm.y.i, Object.assign({}, mv, { achatHT: x.achatHT, ref: `${mv.ref || ''} → ${libDoc}` }));
+      }
+      continue;
+    }
+    lignesDoc.push(ligneDoc);
+    if (dejaMv) continue;
     const st = Store.get('stock', x.p.id) || { qte: 0, unite: x.unite, min: null };
     const q = Math.round(((num(st.qte) || 0) + x.qte) * 1000) / 1000;
     const avant = num(st.qte) || 0, pa = num(st.achatHT);   // prix d'achat moyen pondéré (stock restant + nouvelle entrée)
     const achat = x.achatHT == null ? (pa ?? null) : (avant > 0 && pa != null ? Math.round((avant * pa + x.qte * x.achatHT) / (avant + x.qte) * 10000) / 10000 : x.achatHT);
     await Store.set('stock', x.p.id, Object.assign({}, st, { qte: q, unite: st.unite || x.unite, nom: x.p.name, maj: maintenant, achatHT: achat, dernierAchatHT: x.achatHT ?? (st.dernierAchatHT ?? null), achatTva: tva != null ? tva : (st.achatTva ?? null), achatLe: f.date || todayStr(), achatFournisseur: f.fournisseur || '', achatFacture: f.numero || '' }));
-    await Store.set('mouvements', 'mv-' + id + '-' + x.i, { date: todayStr(), t: nowTime(), produitId: x.p.id, produitNom: x.p.name, type: 'entree', qte: x.qte, unite: st.unite || x.unite, achatHT: x.achatHT, ref: `Facture ${f.fournisseur || ''}${f.numero ? ' n° ' + f.numero : ''}`, factureId: id, cree: maintenant });
+    await Store.set('mouvements', 'mv-' + id + '-' + x.i, { date: todayStr(), t: nowTime(), produitId: x.p.id, produitNom: x.p.name, type: 'entree', qte: x.qte, unite: st.unite || x.unite, achatHT: x.achatHT, ref: libDoc, factureId: id, cree: maintenant });
+    entrees.push(x);
+  }
+  for (const [eid, lst] of marques) {   // l'autre document garde la trace du rapprochement (sa ligne ne pourra plus servir deux fois)
+    const e = Store.get('factures', eid); if (!e || !e.stock || !Array.isArray(e.stock.lignes)) continue;
+    await Store.set('factures', eid, Object.assign({}, e, { stock: Object.assign({}, e.stock, { lignes: e.stock.lignes.map((y, j) => { const m = lst.find(z => z.j === j); return m ? Object.assign({}, y, { jumeau: m.cle }) : y; }) }) }));
   }
   f = Store.get('factures', id) || f;
-  await Store.set('factures', id, Object.assign({}, f, { stock: { fait: true, le: maintenant, par: Store.deviceId(), lignes: L.map(x => ({ i: x.i, produitId: x.p.id, qte: x.qte, unite: x.unite, achatHT: x.achatHT })) } }));
-  toast('Entré en stock : ' + L.map(x => `${x.p.name} +${fmtQty(x.qte)} ${UNIT_NAME[x.unite] || x.unite}`).join(', '), 'ok', 6000);
+  await Store.set('factures', id, Object.assign({}, f, { stock: { fait: true, le: maintenant, par: Store.deviceId(), lignes: lignesDoc } }));
+  const parts = [];
+  if (entrees.length) parts.push('Entré en stock : ' + entrees.map(x => `${x.p.name} +${fmtQty(x.qte)} ${UNIT_NAME[x.unite] || x.unite}`).join(', '));
+  if (jumelees.length) parts.push((f.type === 'facture' ? 'Déjà en stock par le bon de livraison (prix mis à jour) : ' : 'Déjà en stock par la facture : ') + jumelees.map(({ x }) => `${x.p.name} ${fmtQty(x.qte)} ${UNIT_NAME[x.unite] || x.unite}`).join(', '));
+  toast(parts.join(' · ') || 'Rien à entrer', 'ok', 7000);
   return true;
 }
 async function annulerStock(id) {
   const f = Store.get('factures', id); if (!f || !f.stock || !f.stock.fait) return;
-  if (!(await confirmDialog('Retirer du stock les quantités de cette facture ?', { ok: 'Retirer', danger: true }))) { ouvrirFacture(id); return; }
+  if (!(await confirmDialog(`Retirer du stock les quantités de ce ${f.type === 'bl' ? 'bon de livraison' : 'document'} ?`, { ok: 'Retirer', danger: true }))) { ouvrirFacture(id); return; }
   for (const x of (f.stock.lignes || [])) {
+    if (x.entre === false) continue;   // cette ligne n'avait pas été comptée (déjà entrée par le BL ou la facture jumelle)
     const st = Store.get('stock', x.produitId);
     if (st) await Store.set('stock', x.produitId, Object.assign({}, st, { qte: Math.round(((num(st.qte) || 0) - x.qte) * 1000) / 1000, maj: new Date().toISOString() }));
     try { await Store.remove('mouvements', 'mv-' + id + '-' + x.i); } catch (e) { }
   }
+  await dejumeler(id);
   await Store.set('factures', id, Object.assign({}, Store.get('factures', id) || f, { stock: null }));
   toast('Quantités retirées du stock'); ouvrirFacture(id);
 }
@@ -3845,11 +4064,11 @@ Views.factures = function () {
   ${list.length ? `<div class="list">${list.map(item).join('')}</div>` : `<div class="empty"><strong>Aucune facture pour l'instant.</strong><span>Les factures reçues par mail à partir du 31 octobre 2026 arriveront ici toutes seules.</span></div>`}
   ${ecartes.length ? `<p class="help" style="margin:14px 0 0"><button class="btn btn-sm" data-act="factecartes">${ecartes.length} document${ecartes.length > 1 ? 's' : ''} mis de côté (pas une facture) — voir</button></p>` : ''}</div>`;
 };
-const ECARTE_LIBELLE = { avoir: 'Avoir', releve: 'Relevé de compte', relance: 'Relance / rappel', tarif: 'Liste de prix', bl: 'Bon de livraison', commande: 'Devis / commande', autre: 'Pas une facture' };
+const ECARTE_LIBELLE = { avoir: 'Avoir', releve: 'Relevé de compte', relance: 'Relance / rappel', tarif: 'Liste de prix', bl: 'Bon de livraison', commande: 'Devis / commande', inconnu: 'Document non reconnu', autre: 'Pas une facture' };
 function ouvrirEcartes() {
   const L = Store.all('factures').filter(f => f.ecarte).sort((a, b) => String(b.cree || '').localeCompare(String(a.cree || '')));
   if (!L.length) { closeModal(); return; }
-  openModal({ title: 'Documents mis de côté', body: `<p class="help">Reçus avec les factures, mais ce ne sont pas des factures : ils ne comptent nulle part. Si l'un d'eux est quand même une facture, touchez « C'est une facture ».</p><div class="list">${L.map(f => `<div class="list-item"><span class="photo-thumb fact-ico" data-act="pdfview" data-id="${f.id}">📄</span><div class="main"><div class="title"><span class="pill pill-neutral">${esc(ECARTE_LIBELLE[f.ecarte] || 'Pas une facture')}</span> ${esc(f.fournisseur || '')}${f.numero ? ` <span class="muted">n° ${esc(f.numero)}</span>` : ''}</div><div class="sub">${esc(f.mail && f.mail.date ? 'reçu le ' + fmtDate(f.mail.date.slice(0, 10)) : fmtDate(f.date))}${f.mail && f.mail.sujet ? ' · ' + esc(f.mail.sujet) : ''}</div></div><button class="btn btn-sm" data-act="pdfview" data-id="${f.id}">Voir</button><button class="btn btn-sm btn-dark" data-act="factforcer" data-id="${f.id}">C'est une facture</button></div>`).join('')}</div>`, footer: `<button class="btn btn-primary" data-close="1">Fermer</button>` });
+  openModal({ title: 'Documents mis de côté', body: `<p class="help">Reçus par mail ou scannés, mais ce ne sont ni des factures ni des bons de livraison (relevés, relances, avoirs, documents administratifs, documents non reconnus…) : ils ne comptent nulle part. Si l'un d'eux est quand même une facture ou un bon de livraison, touchez « C'est une facture ».</p><div class="list">${L.map(f => `<div class="list-item"><span class="photo-thumb fact-ico" data-act="pdfview" data-id="${f.id}">📄</span><div class="main"><div class="title"><span class="pill pill-neutral">${esc(ECARTE_LIBELLE[f.ecarte] || 'Pas une facture')}</span> ${esc(f.fournisseur || '')}${f.numero ? ` <span class="muted">n° ${esc(f.numero)}</span>` : ''}</div><div class="sub">${esc(f.mail && f.mail.date ? 'reçu le ' + fmtDate(f.mail.date.slice(0, 10)) : fmtDate(f.date))}${f.mail && f.mail.sujet ? ' · ' + esc(f.mail.sujet) : ''}</div></div><button class="btn btn-sm" data-act="pdfview" data-id="${f.id}">Voir</button><button class="btn btn-sm btn-dark" data-act="factforcer" data-id="${f.id}">C'est une facture</button></div>`).join('')}</div>`, footer: `<button class="btn btn-primary" data-close="1">Fermer</button>` });
 }
 Object.assign(Actions, {
   factlier: el => ouvrirLiaison(el.dataset.id, +el.dataset.i),
