@@ -2976,6 +2976,8 @@ const FactEngine = (() => {
     const haut = texte.split('\n').slice(0, 18).join('\n');
     if (RE_FICHIER_PAS_FACTURE.test(nom) && !RE_FICHIER_FACTURE.test(nom)) return 'autre';
     if (/N[°º] b\.l\.\s*\.\s*\.\s*:|TARIF A TITRE INDICATIF, FACTURE FAISANT FOI/i.test(texte.slice(0, 3000))) return 'bl';
+    const titre = texte.split('\n').slice(0, 6).join('\n');   // « BON DE LIVRAISON » en titre (sans « FACTURE ») : un BL, pas une facture
+    if (/\bBON DE LIVRAISON\b|\bLEVERINGSBON\b|\bDELIVERY NOTE\b/i.test(titre) && !/\bFACTURE\b|\bINVOICE\b|\bFACTUUR\b/i.test(titre)) return 'bl';
     if (/cours du veau|cours veau|communiquons les cours|mercuriale|liste de prix|prix de la semaine/i.test(haut)) return 'tarif';
     if (/EXTRAIT DE COMPTE|RELEV[ÉE] DE (?:COMPTE|FACTURES)|SITUATION DE (?:VOTRE )?COMPTE|REKENINGUITTREKSEL|GRANDS? LIVRES?|RELEV[ÉE]S? D'IDENTIT[ÉE] BANCAIRE|Confirmation du jour/i.test(haut)) return 'releve';
     if (/^\s*(?:\d+\s*(?:[èe]me|e|ère)\s+)?(?:RELANCE|RAPPEL|MISE EN DEMEURE|AANMANING|HERINNERING)\b/im.test(haut)) return 'relance';
@@ -3030,7 +3032,7 @@ if (typeof module !== 'undefined') module.exports = FactEngine;
    où lire le numéro, la date, l'échéance, le total HT, la TVA (taux et montants), le TTC et les lignes.
    Quand on améliore un gabarit, on augmente GABARITS_VERSION : l'appli relit alors toute seule
    les factures déjà importées (sauf celles corrigées à la main). */
-const GABARITS_VERSION = 9;
+const GABARITS_VERSION = 10;
 const GABARITS = (() => {
   const M = FactEngine.montant, MS = FactEngine.montants, D = FactEngine.dateIso, cols = FactEngine.cols;
   const TAUX = [2.1, 5.5, 6, 10, 20, 21, 0];
@@ -3589,7 +3591,7 @@ setInterval(() => FactLecture.planifier(), 20000);
 /* ---------- mise à jour automatique ----------
    Quand une nouvelle version est publiée, chaque appareil (iPad du comptoir, téléphone) se recharge tout seul
    au premier moment calme : pas de fenêtre ouverte, pas de saisie en cours, pas d'alerte qui sonne, pas d'enregistrement. */
-const APP_VERSION = 'a363e43dac';
+const APP_VERSION = '489b64a419';
 const MiseAJour = {
   attente: null, _t: 0,
   async verifier() {
