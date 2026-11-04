@@ -14,8 +14,9 @@
  *      la toucher ouvre la conversation avec Claude pour la traiter (fournisseur, gabarit, références → produits) ;
  *   6. repère aussi les mails avec un PDF « facture » venant d'un expéditeur INCONNU (nouveau fournisseur ?) :
  *      ils ne sont pas copiés, mais Adam est prévenu une fois (libellé « BHVA-vu ») pour qu'on les ajoute à la liste ;
- *   7. les documents SCANNÉS par le Brother ADS-1700W (fonction scans), qui les envoie par mail à bhva59@gmail.com
- *      (de lui-même à lui-même), sont copiés dans l'appli ; l'iPad (ou le PC) lit ensuite le scan par reconnaissance
+ *   7. les documents SCANNÉS par le Brother ADS-1700W sont copiés dans l'appli, qu'ils arrivent par mail (scanner en Wi-Fi,
+ *      de bhva59 à lui-même) ou dans le dossier Google Drive « Scanner BHVA » (scanner branché en USB au PC, dossier
+ *      synchronisé par Google Drive pour ordinateur) ; l'iPad (ou le PC) lit ensuite le scan par reconnaissance
  *      de caractères (facture ou bon de livraison ; le reste est mis de côté) et prévient le téléphone d'Adam.
  * Une fois par heure (fonction verifier) : filet de sécurité si la cadence des 5 minutes s'est arrêtée.
  * Par mail, relevés, relances, avoirs, cours, devis… ne sont jamais pris (liste blanche).
@@ -27,6 +28,8 @@ const CONFIG = {
   DEPUIS: new Date('2026-10-30T23:00:00Z'), // départ : factures reçues à partir du 31/10/2026 00h00 (heure de Paris)
   LIBELLE: 'BHVA-importee',
   LIBELLE_VU: 'BHVA-vu',                    // mails avec PDF déjà regardés par le repérage des nouveaux fournisseurs
+  DOSSIER_SCANS: 'Scanner BHVA',            // dossier Google Drive (Mon Drive) où le scanner en USB dépose ses PDF
+  DOSSIER_IMPORTES: 'Importés',             // sous-dossier où les PDF sont rangés une fois copiés dans l'appli
   PROJET: 'bhva-gestion',
   CLE_API: 'AIzaSyAuEx9IUK0JdWXJeLgFj86IB0-KCdwaf4U', // clé publique de l'appli (déjà visible dans le site)
   TAILLE_MORCEAU: 900000,    // découpe des PDF pour la base (limite 1 Mo par fiche)
@@ -97,14 +100,17 @@ function installer() {
   PropertiesService.getScriptProperties().deleteProperty('dernier');
   const n = importer_();
   try { scansSeuls_(); } catch (e) { }
-  Logger.log('Robot installé (vérification toutes les ' + CONFIG.MINUTES + ' minutes). ' + n + ' facture(s) copiée(s) dans l\'appli.');
+  const dossier = dossierScans_();
+  try { scansDrive_(); } catch (e) { Logger.log('Scans Drive : ' + e); }
+  Logger.log('Robot installé (vérification toutes les ' + CONFIG.MINUTES + ' minutes). ' + n + ' facture(s) copiée(s) dans l\'appli. Dossier des scans : Mon Drive / ' + dossier.getName());
 }
 
 /* Toutes les 5 minutes : les factures reçues par mail, puis les documents scannés. Rapide quand il n'y a rien de nouveau
    (une recherche Gmail sur les mails pas encore rangés), donc largement dans les quotas gratuits de Google. */
 function toutesLes5Minutes() {
   try { importer_(); } catch (e) { Logger.log('Factures par mail : ' + e); }
-  try { scansSeuls_(); } catch (e) { Logger.log('Scans : ' + e); }
+  try { scansSeuls_(); } catch (e) { Logger.log('Scans par mail : ' + e); }
+  try { scansDrive_(); } catch (e) { Logger.log('Scans Drive : ' + e); }
 }
 /* Nom historique du déclencheur des 5 minutes (anciennes installations) : fait la même chose. */
 function scans() { toutesLes5Minutes(); }
@@ -133,6 +139,64 @@ function scansSeuls_() {
     if (nouvelles) PropertiesService.getScriptProperties().setProperty('dernierScan', new Date().toISOString() + ' · ' + nouvelles + ' scan(s)');
   } finally { verrou.releaseLock(); }
   return nouvelles;
+}
+
+/* ============ Scanner branché en USB au PC : dossier Google Drive « Scanner BHVA » ============
+   Brother iPrint&Scan (sur le PC) enregistre chaque document scanné en PDF dans ce dossier ; Google Drive pour ordinateur
+   l'envoie dans Mon Drive ; ici, toutes les 5 minutes, chaque PDF est copié dans l'appli puis rangé dans « Importés ». */
+function dossierScans_() {
+  const racine = DriveApp.getRootFolder();
+  const it = racine.getFoldersByName(CONFIG.DOSSIER_SCANS);
+  return it.hasNext() ? it.next() : racine.createFolder(CONFIG.DOSSIER_SCANS);
+}
+function sousDossier_(dossier, nom) { const it = dossier.getFoldersByName(nom); return it.hasNext() ? it.next() : dossier.createFolder(nom); }
+function scansDrive_() {
+  const verrou = LockService.getScriptLock();
+  if (!verrou.tryLock(5000)) return 0;
+  let nouvelles = 0;
+  try {
+    const dossier = dossierScans_(); const importes = sousDossier_(dossier, CONFIG.DOSSIER_IMPORTES);
+    const fichiers = dossier.getFiles();
+    while (fichiers.hasNext()) {
+      const f = fichiers.next();
+      if (!/\.pdf$/i.test(f.getName()) && f.getMimeType() !== MimeType.PDF) continue;
+      if (Date.now() - f.getLastUpdated().getTime() < 30000) continue;   // encore en cours d'envoi par Google Drive : au prochain passage
+      try {
+        const quand = f.getDateCreated();
+        const fait = enregistrerPdf_(f.getBlob().getBytes(), f.getName(), {
+          fournisseur: '', date: Utilities.formatDate(quand, 'Europe/Paris', 'yyyy-MM-dd'), source: 'scan',
+          scan: { de: 'Brother ADS-1700W (USB)', le: quand.toISOString(), nom: f.getName() }
+        });
+        if (fait) nouvelles++;
+        f.moveTo(importes);
+      } catch (e) { Logger.log('Scan Drive ' + f.getName() + ' : ' + e); }
+    }
+    if (nouvelles) PropertiesService.getScriptProperties().setProperty('dernierScan', new Date().toISOString() + ' · ' + nouvelles + ' scan(s) Drive');
+  } finally { verrou.releaseLock(); }
+  return nouvelles;
+}
+
+/* Copie un PDF dans l'appli (fiche « factures » + PDF découpé dans « factures_pdf ») ; false si déjà présent (même empreinte). */
+function enregistrerPdf_(octets, nom, infos) {
+  const empreinte = hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, octets));
+  const id = 'm-' + empreinte.slice(0, 24);
+  if (existe_('factures/' + id)) return false;              // déjà dans l'appli : pas de doublon
+  const b64 = Utilities.base64Encode(octets);
+  const morceaux = Math.ceil(b64.length / CONFIG.TAILLE_MORCEAU) || 1;
+  for (let k = 0; k < morceaux; k++) {
+    creer_('factures_pdf', id + '_' + k, { d: b64.slice(k * CONFIG.TAILLE_MORCEAU, (k + 1) * CONFIG.TAILLE_MORCEAU), k: k, n: morceaux });
+  }
+  const fiche = {
+    type: 'facture', fournisseur: infos.fournisseur || '', numero: '', date: infos.date, echeance: '',
+    ht: null, tva: null, ttc: null, statut: 'a_payer', note: '', photo: '',
+    source: infos.source, lu: 'a_lire',
+    pdf: { n: morceaux, taille: octets.length, sha256: empreinte, nom: nom },
+    cree: new Date().toISOString()
+  };
+  if (infos.mail) fiche.mail = infos.mail;
+  if (infos.scan) fiche.scan = infos.scan;
+  creer_('factures', id, fiche);
+  return true;
 }
 
 /* Pour forcer une vérification tout de suite (bouton ▶ sur cette fonction). */
@@ -259,26 +323,12 @@ function traiterMessage_(msg, liste) {
   const pdfs = msg.getAttachments({ includeInlineImages: false }).filter(a => pdfFacture(regle, a.getName()));
   let n = 0;
   pdfs.forEach(a => {
-    const octets = a.getBytes();
-    const empreinte = hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, octets));
-    const id = 'm-' + empreinte.slice(0, 24);
-    if (existe_('factures/' + id)) return;              // déjà dans l'appli : pas de doublon
-    const b64 = Utilities.base64Encode(octets);
-    const morceaux = Math.ceil(b64.length / CONFIG.TAILLE_MORCEAU) || 1;
-    for (let k = 0; k < morceaux; k++) {
-      creer_('factures_pdf', id + '_' + k, { d: b64.slice(k * CONFIG.TAILLE_MORCEAU, (k + 1) * CONFIG.TAILLE_MORCEAU), k: k, n: morceaux });
-    }
-    const date = Utilities.formatDate(msg.getDate(), 'Europe/Paris', 'yyyy-MM-dd');
-    const fiche = {
-      type: 'facture', fournisseur: regle.f, numero: '', date: date, echeance: '',
-      ht: null, tva: null, ttc: null, statut: 'a_payer', note: '', photo: '',
-      source: regle.scan ? 'scan' : 'mail', lu: 'a_lire',
-      pdf: { n: morceaux, taille: octets.length, sha256: empreinte, nom: a.getName() },
+    const fait = enregistrerPdf_(a.getBytes(), a.getName(), {
+      fournisseur: regle.f, date: Utilities.formatDate(msg.getDate(), 'Europe/Paris', 'yyyy-MM-dd'), source: regle.scan ? 'scan' : 'mail',
       mail: { id: msg.getId(), de: de, email: email, sujet: sujet, date: msg.getDate().toISOString() },
-      cree: new Date().toISOString()
-    };
-    if (regle.scan) fiche.scan = { de: 'Brother ADS-1700W', le: msg.getDate().toISOString(), nom: a.getName() };
-    creer_('factures', id, fiche);
+      scan: regle.scan ? { de: 'Brother ADS-1700W', le: msg.getDate().toISOString(), nom: a.getName() } : null
+    });
+    if (!fait) return;                                     // déjà dans l'appli : pas de doublon
     n++;
     if (liste && !regle.scan) liste.push({ f: regle.f, sujet: sujet, date: msg.getDate(), mixte: !!regle.mixte });
   });
